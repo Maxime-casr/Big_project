@@ -1,0 +1,17 @@
+{
+    "name": "BigProject.Client",
+    "rootNamespace": "BigProject.Client",
+    "references": [
+        "BigProject.Core",
+        "Unity.InputSystem"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
