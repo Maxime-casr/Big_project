@@ -77,6 +77,14 @@ namespace BigProject.Core.Units
             Position = position;
         }
 
+        /// <summary>Remplace l'état variable par celui reçu du serveur. Réservé à la synchronisation réseau.</summary>
+        internal void ApplyStatus(GridPosition position, int health, int mana)
+        {
+            Position = position;
+            Health = Math.Max(0, Math.Min(MaxHealth, health));
+            Mana = Math.Max(0, Math.Min(MaxMana, mana));
+        }
+
         /// <summary>Applique une variation de PV (négative = dégâts), bornée entre 0 et MaxHealth.</summary>
         public void ChangeHealth(int delta)
         {

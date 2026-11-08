@@ -36,6 +36,7 @@ namespace BigProject.Client
         private ResolutionPlayer resolutionPlayer;
         private GridPosition? hoveredCell;
         private bool submitted;
+        private float previousSecondsRemaining;
 
         public PlanningTool Tool { get; private set; }
         public int SelectedUnitId { get; private set; } = -1;
@@ -71,7 +72,18 @@ namespace BigProject.Client
             input.CellRightClicked += _ => UndoLastOrder();
             input.HoverChanged += OnHoverChanged;
             session.RoundResolved += OnRoundResolved;
+            session.PlanRejected += OnPlanRejected;
             resolutionPlayer.PlaybackFinished += RefreshHighlights;
+            previousSecondsRemaining = session.PlanningSecondsRemaining;
+        }
+
+        private void OnDestroy()
+        {
+            if (session != null)
+            {
+                session.RoundResolved -= OnRoundResolved;
+                session.PlanRejected -= OnPlanRejected;
+            }
         }
 
         public UnitState SelectedUnit => SelectedUnitId < 0 ? null : session.State.GetUnit(SelectedUnitId);
@@ -189,6 +201,15 @@ namespace BigProject.Client
 
         private void Update()
         {
+            // Temps écoulé : on envoie ce qui est planifié, le serveur ne peut pas attendre davantage.
+            float remaining = session.PlanningSecondsRemaining;
+            bool timedOut = previousSecondsRemaining > 0f && remaining <= 0f;
+            previousSecondsRemaining = remaining;
+            if (timedOut && !IsLocked)
+            {
+                Submit();
+            }
+
             Keyboard keyboard = Keyboard.current;
             if (keyboard == null || IsLocked)
             {
@@ -287,6 +308,13 @@ namespace BigProject.Client
 
             drafts[unit.Id] = candidate;
             Message = successMessage;
+            RefreshHighlights();
+        }
+
+        private void OnPlanRejected(string reason)
+        {
+            submitted = false;
+            Message = "Plan refusé par le serveur : " + reason;
             RefreshHighlights();
         }
 

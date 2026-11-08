@@ -1,0 +1,19 @@
+{
+    "name": "BigProject.Online",
+    "rootNamespace": "BigProject.Online",
+    "references": [
+        "BigProject.Core",
+        "Mirror",
+        "Mirror.Transports",
+        "kcp2k"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

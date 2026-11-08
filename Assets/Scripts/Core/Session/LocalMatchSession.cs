@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using BigProject.Core.Match;
 using BigProject.Core.Orders;
 using BigProject.Core.Resolution;
@@ -13,66 +12,36 @@ namespace BigProject.Core.Session
     /// </summary>
     public sealed class LocalMatchSession : IMatchSession
     {
-        private readonly RoundResolver resolver;
-        private readonly SortedDictionary<int, TurnPlan> submittedPlans = new SortedDictionary<int, TurnPlan>();
+        private readonly AuthoritativeMatch match;
 
         public LocalMatchSession(MatchState state, SpellCatalog spells, RoundResolver resolver)
         {
-            State = state;
             Spells = spells;
-            this.resolver = resolver;
+            match = new AuthoritativeMatch(state, resolver);
+            match.RoundResolved += result => RoundResolved?.Invoke(result);
         }
 
-        public MatchState State { get; }
+        public MatchState State => match.State;
         public SpellCatalog Spells { get; }
+        public float PlanningSecondsRemaining => 0f;
 
         public event Action<RoundResult> RoundResolved;
 
-        public bool TrySubmitPlan(TurnPlan plan, out string error)
+        // Hors ligne, un plan invalide est signalé directement par TrySubmitPlan.
+        public event Action<string> PlanRejected
         {
-            if (plan == null)
-            {
-                error = "Plan vide.";
-                return false;
-            }
-
-            if (State.Phase != MatchPhase.Planning)
-            {
-                error = "Le match n'accepte pas de plan pour le moment.";
-                return false;
-            }
-
-            if (!State.GetActivePlayerIds().Contains(plan.PlayerId))
-            {
-                error = "Ce joueur n'a plus d'unité en vie.";
-                return false;
-            }
-
-            if (submittedPlans.ContainsKey(plan.PlayerId))
-            {
-                error = "Ce joueur a déjà validé son tour.";
-                return false;
-            }
-
-            submittedPlans.Add(plan.PlayerId, plan);
-            error = null;
-
-            if (submittedPlans.Count >= State.GetActivePlayerIds().Count)
-            {
-                ResolveNow();
-            }
-
-            return true;
+            add { }
+            remove { }
         }
 
-        /// <summary>Force la résolution (fin du chrono, par exemple). Les joueurs sans plan restent immobiles.</summary>
+        public bool TrySubmitPlan(TurnPlan plan, out string error)
+        {
+            return match.TrySubmitPlan(plan, out error);
+        }
+
         public RoundResult ResolveNow()
         {
-            var plans = new List<TurnPlan>(submittedPlans.Values);
-            submittedPlans.Clear();
-            RoundResult result = resolver.Resolve(State, plans);
-            RoundResolved?.Invoke(result);
-            return result;
+            return match.ResolveNow();
         }
     }
 }

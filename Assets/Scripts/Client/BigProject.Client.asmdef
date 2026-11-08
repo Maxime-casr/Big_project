@@ -3,6 +3,7 @@
     "rootNamespace": "BigProject.Client",
     "references": [
         "BigProject.Core",
+        "BigProject.Online",
         "Unity.InputSystem"
     ],
     "includePlatforms": [],

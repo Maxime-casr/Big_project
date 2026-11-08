@@ -22,6 +22,8 @@ namespace BigProject.Client
 
         public float PanelWidth => Mathf.Min(MaxPanelWidth, Screen.width * 0.4f);
 
+        public event System.Action QuitRequested;
+
         public void Init(PlanningController planningController, UnitViewRegistry unitViews, ResolutionPlayer resolutionPlayer)
         {
             planning = planningController;
@@ -44,7 +46,7 @@ namespace BigProject.Client
             MatchState state = planning.State;
             GUILayout.BeginArea(new Rect(Screen.width - PanelWidth, 0f, PanelWidth, Screen.height), GUI.skin.box);
 
-            GUILayout.Label("<b>Tour " + state.RoundNumber + "</b>   (3 contre 3 — test local)", RichLabel());
+            GUILayout.Label("<b>Tour " + state.RoundNumber + "</b>" + TimerText(), RichLabel());
             GUILayout.Label(PhaseText(state));
             GUILayout.Space(6f);
 
@@ -56,7 +58,23 @@ namespace BigProject.Client
             GUILayout.Label(planning.Message);
             DrawSubmitButton(state);
             GUILayout.Label("Clic droit / Retour : annuler · Échap : sélection · Entrée : valider");
+            if (GUILayout.Button("Quitter le match"))
+            {
+                QuitRequested?.Invoke();
+            }
+
             GUILayout.EndArea();
+        }
+
+        private string TimerText()
+        {
+            float seconds = planning.Session.PlanningSecondsRemaining;
+            if (seconds <= 0f || planning.State.Phase != MatchPhase.Planning || resolution.IsPlaying)
+            {
+                return string.Empty;
+            }
+
+            return "   —   temps restant : " + Mathf.CeilToInt(seconds) + " s";
         }
 
         private void DrawUnitList(MatchState state)
