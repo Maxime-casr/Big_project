@@ -53,10 +53,17 @@ namespace BigProject.Client
             PlanningController planning = CreateChild<PlanningController>("Planning");
             planning.Init(session, board, highlighter, units, input, resolution, localPlayerIds);
 
-            HudView hud = CreateChild<HudView>("Hud");
+            // Le HUD est celui du Canvas de la scène ; à défaut, un Canvas généré est créé.
+            CombatHud hud = FindAnyObjectByType<CombatHud>();
+            if (hud == null)
+            {
+                hud = CombatHud.CreateFallback();
+                hud.transform.SetParent(transform, false);
+            }
+
             hud.Init(planning, units, resolution);
             hud.QuitRequested += () => QuitRequested?.Invoke();
-            input.IsPointerBlocked = hud.ContainsScreenPoint;
+            input.IsPointerBlocked = _ => hud.IsPointerOverUi;
 
             CameraRig rig = camera.GetComponent<CameraRig>();
             if (rig == null)
@@ -64,7 +71,7 @@ namespace BigProject.Client
                 rig = camera.gameObject.AddComponent<CameraRig>();
             }
 
-            rig.Init(session.State.Map, () => hud.PanelWidth);
+            rig.Init(session.State.Map, () => 0f);
         }
 
         private void OnRoundResolved(RoundResult result)

@@ -1,49 +1,40 @@
 using System;
-using System.Collections.Generic;
-using BigProject.Core.Match;
 using BigProject.Core.Net;
-using BigProject.Core.Resolution;
-using BigProject.Core.Session;
 using BigProject.Core.Spells;
-using BigProject.Core.Units;
-using BigProject.Online;
 using UnityEngine;
 
 namespace BigProject.Client
 {
     /// <summary>
-    /// Point d'entrée de la scène. Trois rôles :
-    /// - jeu hors ligne (test local, un seul poste contrôle tous les joueurs) ;
-    /// - client en ligne (file d'attente, puis match sur le serveur) ;
-    /// - serveur (menu "Lancer un serveur", ou automatiquement avec l'argument -server / en batchmode).
+    /// Scène de menu : combat local de test, recherche d'une partie en ligne, ou lancement d'un serveur
+    /// (aussi automatique avec l'argument -server ou en batchmode).
     /// Arguments du serveur : -port 7777 -playersPerTeam 3 -planningSeconds 45
     /// </summary>
-    public sealed class GameBootstrap : MonoBehaviour
+    public sealed class MainMenu : MonoBehaviour
     {
-        private enum AppState
+        private enum MenuState
         {
             Menu,
             Connecting,
-            InMatch,
             Server
         }
 
-        private AppState state = AppState.Menu;
+        private MenuState state = MenuState.Menu;
         private string address = "localhost";
         private string portText = "7777";
         private string playerName = "Joueur";
         private string playersPerTeamText = "3";
-        private string menuMessage = string.Empty;
+        private string message = string.Empty;
         private string queueMessage = string.Empty;
 
-        private MirrorNetworkRunner runner;
         private NetworkMatchSession onlineSession;
-        private MatchScene matchScene;
         private bool returnToMenuRequested;
         private string returnToMenuMessage;
 
         private void Start()
         {
+            message = GameFlow.MenuMessage;
+
             if (Application.isBatchMode || HasArgument("-server"))
             {
                 StartServer(
@@ -58,47 +49,62 @@ namespace BigProject.Client
             if (returnToMenuRequested)
             {
                 returnToMenuRequested = false;
-                ReturnToMenu(returnToMenuMessage);
+                GameFlow.ReturnToMenu(returnToMenuMessage);
             }
+        }
+
+        private void OnDestroy()
+        {
+            Unsubscribe();
         }
 
         private void OnGUI()
         {
             switch (state)
             {
-                case AppState.Menu:
+                case MenuState.Menu:
                     DrawMenu();
                     break;
-                case AppState.Connecting:
-                    DrawCenteredBox(() =>
+                case MenuState.Connecting:
+                    DrawBox(() =>
                     {
                         GUILayout.Label(string.IsNullOrEmpty(queueMessage) ? "Connexion au serveur..." : queueMessage);
                         if (GUILayout.Button("Annuler"))
                         {
-                            ReturnToMenu(null);
+                            GameFlow.ReturnToMenu();
                         }
                     });
                     break;
-                case AppState.Server:
-                    DrawServerStatus();
+                case MenuState.Server:
+                    DrawBox(() =>
+                    {
+                        GUILayout.Label("<b>Serveur en fonctionnement</b>", RichLabel());
+                        GUILayout.Label("Port " + portText + " — " + playersPerTeamText + " joueur(s) par équipe");
+                        GUILayout.Label("File d'attente : " + GameFlow.Runner.QueuedPlayerCount);
+                        GUILayout.Label("Matchs en cours : " + GameFlow.Runner.ActiveMatchCount);
+                        if (GUILayout.Button("Arrêter le serveur"))
+                        {
+                            GameFlow.ReturnToMenu();
+                        }
+                    });
                     break;
             }
         }
 
         private void DrawMenu()
         {
-            DrawCenteredBox(() =>
+            DrawBox(() =>
             {
                 GUILayout.Label("<b>Big Project — tour par tour simultané</b>", RichLabel());
-                if (!string.IsNullOrEmpty(menuMessage))
+                if (!string.IsNullOrEmpty(message))
                 {
-                    GUILayout.Label(menuMessage);
+                    GUILayout.Label(message);
                 }
 
                 GUILayout.Space(8f);
-                if (GUILayout.Button("Jouer hors ligne (test local)", GUILayout.Height(32f)))
+                if (GUILayout.Button("Combat local (test)", GUILayout.Height(36f)))
                 {
-                    StartOffline();
+                    GameFlow.StartLocalTest();
                 }
 
                 GUILayout.Space(10f);
@@ -121,63 +127,27 @@ namespace BigProject.Client
             });
         }
 
-        private void DrawServerStatus()
-        {
-            DrawCenteredBox(() =>
-            {
-                GUILayout.Label("<b>Serveur en fonctionnement</b>", RichLabel());
-                GUILayout.Label("Port " + portText + " — " + playersPerTeamText + " joueur(s) par équipe");
-                GUILayout.Label("File d'attente : " + Runner.QueuedPlayerCount);
-                GUILayout.Label("Matchs en cours : " + Runner.ActiveMatchCount);
-                if (GUILayout.Button("Arrêter le serveur"))
-                {
-                    ReturnToMenu(null);
-                }
-            });
-        }
-
-        private void StartOffline()
-        {
-            var config = new MatchConfig();
-            SpellCatalog spells = SpellCatalog.CreateDefault();
-            MatchState match = MatchFactory.CreateDemo3v3(config, spells);
-            var resolver = new RoundResolver(spells, new LastTeamStandingCondition());
-            var session = new LocalMatchSession(match, spells, resolver);
-
-            // Test local : un seul poste contrôle tous les joueurs.
-            var localPlayers = new List<int>();
-            foreach (UnitState unit in match.Units)
-            {
-                if (!localPlayers.Contains(unit.PlayerId))
-                {
-                    localPlayers.Add(unit.PlayerId);
-                }
-            }
-
-            EnterMatch(session, localPlayers);
-        }
-
         private void ConnectOnline()
         {
             if (!ushort.TryParse(portText, out ushort port))
             {
-                menuMessage = "Port invalide.";
+                message = "Port invalide.";
                 return;
             }
 
             queueMessage = string.Empty;
-            onlineSession = Runner.StartClient(address, port, playerName, SpellCatalog.CreateDefault());
+            onlineSession = GameFlow.Runner.StartClient(address, port, playerName, SpellCatalog.CreateDefault());
             onlineSession.QueueChanged += OnQueueChanged;
             onlineSession.MatchStarted += OnMatchStarted;
             onlineSession.Failed += OnNetworkFailed;
-            state = AppState.Connecting;
+            state = MenuState.Connecting;
         }
 
         private void StartServer(int port, int playersPerTeam, int planningSeconds)
         {
             if (port < 1 || port > ushort.MaxValue || playersPerTeam < 1 || playersPerTeam > 4)
             {
-                menuMessage = "Paramètres de serveur invalides.";
+                message = "Paramètres de serveur invalides.";
                 return;
             }
 
@@ -191,8 +161,8 @@ namespace BigProject.Client
                 PlanningSeconds = planningSeconds
             };
 
-            Runner.StartServer((ushort)port, settings, SpellCatalog.CreateDefault());
-            state = AppState.Server;
+            GameFlow.Runner.StartServer((ushort)port, settings, SpellCatalog.CreateDefault());
+            state = MenuState.Server;
             Debug.Log("Serveur démarré sur le port " + port + " (" + playersPerTeam + " joueur(s) par équipe).");
         }
 
@@ -203,7 +173,9 @@ namespace BigProject.Client
 
         private void OnMatchStarted()
         {
-            EnterMatch(onlineSession, new[] { onlineSession.LocalPlayerId });
+            NetworkMatchSession session = onlineSession;
+            Unsubscribe();
+            GameFlow.EnterOnlineMatch(session);
         }
 
         private void OnNetworkFailed(string reason)
@@ -213,65 +185,20 @@ namespace BigProject.Client
             returnToMenuMessage = reason;
         }
 
-        private void EnterMatch(IMatchSession session, IEnumerable<int> localPlayerIds)
+        private void Unsubscribe()
         {
-            Camera camera = Camera.main != null ? Camera.main : FindAnyObjectByType<Camera>();
-            if (camera == null)
+            if (onlineSession == null)
             {
-                Debug.LogError("GameBootstrap : aucune caméra dans la scène.");
                 return;
             }
 
-            matchScene = MatchScene.Create(transform, camera, session, localPlayerIds);
-            matchScene.QuitRequested += () =>
-            {
-                returnToMenuRequested = true;
-                returnToMenuMessage = null;
-            };
-            state = AppState.InMatch;
+            onlineSession.QueueChanged -= OnQueueChanged;
+            onlineSession.MatchStarted -= OnMatchStarted;
+            onlineSession.Failed -= OnNetworkFailed;
+            onlineSession = null;
         }
 
-        private void ReturnToMenu(string message)
-        {
-            if (onlineSession != null)
-            {
-                onlineSession.QueueChanged -= OnQueueChanged;
-                onlineSession.MatchStarted -= OnMatchStarted;
-                onlineSession.Failed -= OnNetworkFailed;
-                onlineSession = null;
-            }
-
-            if (runner != null)
-            {
-                runner.Shutdown();
-            }
-
-            if (matchScene != null)
-            {
-                Destroy(matchScene.gameObject);
-                matchScene = null;
-            }
-
-            menuMessage = message ?? string.Empty;
-            state = AppState.Menu;
-        }
-
-        private MirrorNetworkRunner Runner
-        {
-            get
-            {
-                if (runner == null)
-                {
-                    var go = new GameObject("Network");
-                    go.transform.SetParent(transform, false);
-                    runner = go.AddComponent<MirrorNetworkRunner>();
-                }
-
-                return runner;
-            }
-        }
-
-        private static void DrawCenteredBox(Action content)
+        private static void DrawBox(Action content)
         {
             const float width = 380f;
             GUILayout.BeginArea(new Rect((Screen.width - width) / 2f, 40f, width, Screen.height - 80f), GUI.skin.box);

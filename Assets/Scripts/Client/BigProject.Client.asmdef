@@ -4,7 +4,8 @@
     "references": [
         "BigProject.Core",
         "BigProject.Online",
-        "Unity.InputSystem"
+        "Unity.InputSystem",
+        "UnityEngine.UI"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

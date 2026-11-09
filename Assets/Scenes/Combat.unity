@@ -3331,7 +3331,7 @@ GameObject:
   - component: {fileID: 700000002}
   - component: {fileID: 700000003}
   m_Layer: 0
-  m_Name: GameBootstrap
+  m_Name: CombatBootstrap
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -3361,7 +3361,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 700000001}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 5c1f0b7d2e8a4d63b9a47e1c3f6d8a20, type: 3}
+  m_Script: {fileID: 11500000, guid: a17d3c5e9b2f4e08b6d1c4f7e2a93b51, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
 --- !u!1 &725925612
@@ -3591,6 +3591,7 @@ GameObject:
   - component: {fileID: 1313867636}
   - component: {fileID: 1313867635}
   - component: {fileID: 1313867634}
+  - component: {fileID: 1313867638}
   m_Layer: 5
   m_Name: Canvas
   m_TagString: Untagged
@@ -3598,6 +3599,23 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
+--- !u!114 &1313867638
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1313867633}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c4a96e2d7b1f4a35893e0d5f2b7c61e9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  moveUp: {fileID: 48880006}
+  moveDown: {fileID: 1637166057}
+  moveLeft: {fileID: 1902187804}
+  moveRight: {fileID: 2136658062}
+  cardContainer: {fileID: 934588739}
 --- !u!114 &1313867634
 MonoBehaviour:
   m_ObjectHideFlags: 0

@@ -145,6 +145,71 @@ namespace BigProject.Client
             RefreshHighlights();
         }
 
+        /// <summary>
+        /// Avance d'une case dans la direction donnée (boutons de direction). Prolonge le déplacement en
+        /// cours de planification ; la direction opposée annule le dernier pas.
+        /// </summary>
+        public void AddStep(GridPosition direction)
+        {
+            UnitState unit = SelectedUnit;
+            if (IsLocked || unit == null)
+            {
+                Message = unit == null ? "Sélectionne d'abord une unité." : Message;
+                return;
+            }
+
+            var candidate = new List<UnitOrder>(GetDraft(unit.Id));
+            int lastIndex = candidate.Count - 1;
+
+            if (lastIndex >= 0 && candidate[lastIndex] is MoveOrder lastMove)
+            {
+                var withoutLast = new List<UnitOrder>(candidate);
+                withoutLast.RemoveAt(lastIndex);
+                GridPosition moveStart = PlanValidator.Project(session.State, session.Spells, unit, withoutLast).FinalPosition;
+
+                var path = new List<GridPosition>(lastMove.Path);
+                GridPosition end = path[path.Count - 1];
+                GridPosition previous = path.Count >= 2 ? path[path.Count - 2] : moveStart;
+
+                if (end + direction == previous)
+                {
+                    path.RemoveAt(path.Count - 1);
+                    if (path.Count == 0)
+                    {
+                        candidate.RemoveAt(lastIndex);
+                    }
+                    else
+                    {
+                        candidate[lastIndex] = new MoveOrder(path);
+                    }
+
+                    drafts[unit.Id] = candidate;
+                    Message = "Pas annulé.";
+                    RefreshHighlights();
+                    return;
+                }
+
+                path.Add(end + direction);
+                candidate[lastIndex] = new MoveOrder(path);
+            }
+            else
+            {
+                GridPosition start = PlanValidator.Project(session.State, session.Spells, unit, candidate).FinalPosition;
+                candidate.Add(new MoveOrder(new[] { start + direction }));
+            }
+
+            PlanProjection projection = PlanValidator.Project(session.State, session.Spells, unit, candidate);
+            if (!projection.IsValid)
+            {
+                Message = projection.Error;
+                return;
+            }
+
+            drafts[unit.Id] = candidate;
+            Message = "Pas ajouté.";
+            RefreshHighlights();
+        }
+
         public void ClearDraft()
         {
             if (IsLocked)
@@ -248,7 +313,16 @@ namespace BigProject.Client
 
                     break;
                 case PlanningTool.Move:
-                    TryAddMove(cell);
+                    UnitState friendly = session.State.GetUnitAt(cell);
+                    if (friendly != null && IsControlledLocally(friendly) && friendly.Id != SelectedUnitId)
+                    {
+                        SelectUnit(friendly.Id);
+                    }
+                    else
+                    {
+                        TryAddMove(cell);
+                    }
+
                     break;
                 case PlanningTool.Spell:
                     TryAddCast(cell);
