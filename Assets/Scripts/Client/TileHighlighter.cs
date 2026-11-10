@@ -8,6 +8,8 @@ namespace BigProject.Client
     {
         Reachable,
         CastRange,
+        AllyMove,
+        AllyCast,
         PlannedMove,
         PlannedCast,
         Path,
@@ -80,6 +82,8 @@ namespace BigProject.Client
             {
                 case HighlightLayer.Reachable: return new Color(0.2f, 0.6f, 1f, 0.35f);
                 case HighlightLayer.CastRange: return new Color(1f, 0.45f, 0.2f, 0.30f);
+                case HighlightLayer.AllyMove: return new Color(0.35f, 0.6f, 1f, 0.28f);
+                case HighlightLayer.AllyCast: return new Color(0.7f, 0.45f, 1f, 0.45f);
                 case HighlightLayer.PlannedMove: return new Color(0.3f, 0.9f, 0.4f, 0.45f);
                 case HighlightLayer.PlannedCast: return new Color(1f, 0.55f, 0.1f, 0.55f);
                 case HighlightLayer.Path: return new Color(1f, 1f, 1f, 0.45f);

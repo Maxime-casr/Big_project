@@ -20,37 +20,62 @@ namespace BigProject.Client
     }
 
     /// <summary>
-    /// Gère la phase de planification du joueur local : sélection d'une unité, construction de sa
+    /// Gère la phase de planification du joueur local : choix de l'unité contrôlée, construction de sa
     /// liste d'actions ordonnée (déplacements, sorts), prévisualisations, puis envoi à la session.
     /// Toute règle est déléguée au Core (PlanValidator, Pathfinder, SpellTargeting).
+    ///
+    /// En test local, plusieurs joueurs sont contrôlés depuis un seul poste : l'unité sélectionnée est
+    /// celle que l'on "joue", et chaque joueur valide son tour séparément (ou tous d'un coup).
     /// </summary>
     public sealed class PlanningController : MonoBehaviour
     {
         private readonly Dictionary<int, List<UnitOrder>> drafts = new Dictionary<int, List<UnitOrder>>();
         private readonly HashSet<int> localPlayerIds = new HashSet<int>();
+        private readonly HashSet<int> submittedPlayers = new HashSet<int>();
 
         private IMatchSession session;
-        private BoardView board;
         private TileHighlighter highlighter;
         private UnitViewRegistry units;
         private ResolutionPlayer resolutionPlayer;
         private GridPosition? hoveredCell;
-        private bool submitted;
         private float previousSecondsRemaining;
+        private bool draftDirty;
+        private float lastDraftSent;
+        private float nextAllyRefresh;
+
+        /// <summary>Ce qu'un allié prévoit à l'action courante (et où il sera à la fin de celle-ci).</summary>
+        public struct AllyPreview
+        {
+            public UnitState Unit;
+            public GridPosition Position;
+            public UnitOrder CurrentOrder;
+        }
 
         public PlanningTool Tool { get; private set; }
         public int SelectedUnitId { get; private set; } = -1;
         public string ActiveSpellId { get; private set; }
         public string Message { get; private set; } = "Sélectionne une unité pour planifier ses actions.";
 
+        /// <summary>L'unité contrôlée a changé : la vue doit se recolorer.</summary>
+        public event Action SelectionChanged;
+
+        /// <summary>La caméra doit revenir sur l'unité contrôlée.</summary>
+        public event Action FocusRequested;
+
         public MatchState State => session.State;
         public IMatchSession Session => session;
+        public UnitState SelectedUnit => SelectedUnitId < 0 ? null : session.State.GetUnit(SelectedUnitId);
+
+        /// <summary>Plusieurs joueurs sont contrôlés depuis ce poste (test local).</summary>
+        public bool IsMultiLocal => localPlayerIds.Count > 1;
+
         public bool IsLocked =>
-            submitted || resolutionPlayer.IsPlaying || session.State.Phase != MatchPhase.Planning;
+            resolutionPlayer.IsPlaying ||
+            session.State.Phase != MatchPhase.Planning ||
+            (SelectedUnit != null && submittedPlayers.Contains(SelectedUnit.PlayerId));
 
         public void Init(
             IMatchSession matchSession,
-            BoardView boardView,
             TileHighlighter tileHighlighter,
             UnitViewRegistry unitViews,
             GridInput input,
@@ -58,7 +83,6 @@ namespace BigProject.Client
             IEnumerable<int> controlledPlayerIds)
         {
             session = matchSession;
-            board = boardView;
             highlighter = tileHighlighter;
             units = unitViews;
             resolutionPlayer = player;
@@ -75,6 +99,8 @@ namespace BigProject.Client
             session.PlanRejected += OnPlanRejected;
             resolutionPlayer.PlaybackFinished += RefreshHighlights;
             previousSecondsRemaining = session.PlanningSecondsRemaining;
+
+            SelectFirstLocalUnit();
         }
 
         private void OnDestroy()
@@ -86,11 +112,14 @@ namespace BigProject.Client
             }
         }
 
-        public UnitState SelectedUnit => SelectedUnitId < 0 ? null : session.State.GetUnit(SelectedUnitId);
-
         public bool IsControlledLocally(UnitState unit)
         {
             return localPlayerIds.Contains(unit.PlayerId);
+        }
+
+        public bool IsPlayerSubmitted(int playerId)
+        {
+            return submittedPlayers.Contains(playerId);
         }
 
         public IReadOnlyList<UnitOrder> GetDraft(int unitId)
@@ -103,6 +132,62 @@ namespace BigProject.Client
         public PlanProjection GetProjection(UnitState unit)
         {
             return PlanValidator.Project(session.State, session.Spells, unit, GetDraft(unit.Id));
+        }
+
+        /// <summary>Numéro (0 = première) de l'action en cours de planification pour l'unité contrôlée.</summary>
+        public int CurrentActionIndex
+        {
+            get
+            {
+                UnitState unit = SelectedUnit;
+                return unit == null ? 0 : Math.Max(0, GetDraft(unit.Id).Count - 1);
+            }
+        }
+
+        /// <summary>
+        /// Les alliés de l'unité contrôlée, à la même action qu'elle : où ils seront à la fin de leur action
+        /// de même numéro, et ce qu'ils y font. Les ennemis n'apparaissent jamais ici.
+        /// </summary>
+        public List<AllyPreview> GetAllyPreviews()
+        {
+            var previews = new List<AllyPreview>();
+            UnitState me = SelectedUnit;
+            if (me == null)
+            {
+                return previews;
+            }
+
+            int index = CurrentActionIndex;
+            foreach (UnitState ally in session.State.Units)
+            {
+                if (!ally.IsAlive || ally.Id == me.Id || ally.TeamId != me.TeamId)
+                {
+                    continue;
+                }
+
+                IReadOnlyList<UnitOrder> orders = IsControlledLocally(ally)
+                    ? GetDraft(ally.Id)
+                    : (session.TryGetAllyDraft(ally.Id, out IReadOnlyList<UnitOrder> received)
+                        ? received
+                        : Array.Empty<UnitOrder>());
+
+                int count = Math.Min(orders.Count, index + 1);
+                var prefix = new List<UnitOrder>(count);
+                for (int i = 0; i < count; i++)
+                {
+                    prefix.Add(orders[i]);
+                }
+
+                PlanProjection projection = PlanValidator.Project(session.State, session.Spells, ally, prefix);
+                previews.Add(new AllyPreview
+                {
+                    Unit = ally,
+                    Position = projection.IsValid ? projection.FinalPosition : ally.Position,
+                    CurrentOrder = orders.Count > index ? orders[index] : null
+                });
+            }
+
+            return previews;
         }
 
         public void SelectUnit(int unitId)
@@ -118,6 +203,32 @@ namespace BigProject.Client
             units.SetSelected(unitId);
             Message = unit.Name + " sélectionné.";
             RefreshHighlights();
+            SelectionChanged?.Invoke();
+            FocusRequested?.Invoke();
+        }
+
+        /// <summary>Passe au joueur local suivant encore en vie (test local).</summary>
+        public void SelectNextLocalUnit()
+        {
+            IReadOnlyList<UnitState> all = session.State.Units;
+            int start = -1;
+            for (int i = 0; i < all.Count; i++)
+            {
+                if (all[i].Id == SelectedUnitId)
+                {
+                    start = i;
+                }
+            }
+
+            for (int offset = 1; offset <= all.Count; offset++)
+            {
+                UnitState candidate = all[(start + offset + all.Count) % all.Count];
+                if (candidate.IsAlive && IsControlledLocally(candidate))
+                {
+                    SelectUnit(candidate.Id);
+                    return;
+                }
+            }
         }
 
         public void SetTool(PlanningTool tool)
@@ -141,7 +252,21 @@ namespace BigProject.Client
             }
 
             list.RemoveAt(list.Count - 1);
+            draftDirty = true;
             Message = "Dernière action annulée.";
+            RefreshHighlights();
+        }
+
+        public void ClearDraft()
+        {
+            if (IsLocked)
+            {
+                return;
+            }
+
+            drafts.Remove(SelectedUnitId);
+            draftDirty = true;
+            Message = "Actions effacées.";
             RefreshHighlights();
         }
 
@@ -152,9 +277,14 @@ namespace BigProject.Client
         public void AddStep(GridPosition direction)
         {
             UnitState unit = SelectedUnit;
-            if (IsLocked || unit == null)
+            if (unit == null)
             {
-                Message = unit == null ? "Sélectionne d'abord une unité." : Message;
+                Message = "Sélectionne d'abord une unité.";
+                return;
+            }
+
+            if (IsLocked)
+            {
                 return;
             }
 
@@ -184,6 +314,7 @@ namespace BigProject.Client
                     }
 
                     drafts[unit.Id] = candidate;
+                    draftDirty = true;
                     Message = "Pas annulé.";
                     RefreshHighlights();
                     return;
@@ -206,34 +337,39 @@ namespace BigProject.Client
             }
 
             drafts[unit.Id] = candidate;
+            draftDirty = true;
             Message = "Pas ajouté.";
             RefreshHighlights();
+            FocusRequested?.Invoke();
         }
 
-        public void ClearDraft()
-        {
-            if (IsLocked)
-            {
-                return;
-            }
-
-            drafts.Remove(SelectedUnitId);
-            Message = "Actions effacées.";
-            RefreshHighlights();
-        }
-
-        /// <summary>Envoie le plan de chaque joueur contrôlé localement.</summary>
+        /// <summary>Valide le tour du joueur contrôlé.</summary>
         public void Submit()
         {
-            if (IsLocked)
+            UnitState unit = SelectedUnit;
+            if (unit != null)
+            {
+                SubmitPlayers(new[] { unit.PlayerId });
+            }
+        }
+
+        /// <summary>Valide le tour de tous les joueurs contrôlés qui ne l'ont pas encore fait.</summary>
+        public void SubmitAll()
+        {
+            SubmitPlayers(new List<int>(localPlayerIds));
+        }
+
+        private void SubmitPlayers(IEnumerable<int> playerIds)
+        {
+            if (resolutionPlayer.IsPlaying || session.State.Phase != MatchPhase.Planning)
             {
                 return;
             }
 
             var plans = new List<TurnPlan>();
-            foreach (int playerId in session.State.GetActivePlayerIds())
+            foreach (int playerId in new SortedSet<int>(playerIds))
             {
-                if (!localPlayerIds.Contains(playerId))
+                if (submittedPlayers.Contains(playerId) || !session.State.GetActivePlayerIds().Contains(playerId))
                 {
                     continue;
                 }
@@ -250,18 +386,29 @@ namespace BigProject.Client
                 plans.Add(new TurnPlan(playerId, unitPlans));
             }
 
-            submitted = true;
-            highlighter.ClearAll();
             foreach (TurnPlan plan in plans)
             {
+                // Marqué avant l'envoi : en local, la résolution peut se déclencher pendant TrySubmitPlan.
+                submittedPlayers.Add(plan.PlayerId);
                 if (!session.TrySubmitPlan(plan, out string error))
                 {
+                    submittedPlayers.Remove(plan.PlayerId);
                     Message = error;
-                    submitted = false;
-                    RefreshHighlights();
                     break;
                 }
             }
+
+            if (resolutionPlayer.IsPlaying)
+            {
+                return;
+            }
+
+            if (plans.Count > 0 && submittedPlayers.Count > 0)
+            {
+                Message = "Tour validé : en attente des autres joueurs.";
+            }
+
+            RefreshHighlights();
         }
 
         private void Update()
@@ -270,13 +417,30 @@ namespace BigProject.Client
             float remaining = session.PlanningSecondsRemaining;
             bool timedOut = previousSecondsRemaining > 0f && remaining <= 0f;
             previousSecondsRemaining = remaining;
-            if (timedOut && !IsLocked)
+            if (timedOut)
             {
-                Submit();
+                SubmitAll();
             }
 
+            SyncDraftAndAllies();
+
             Keyboard keyboard = Keyboard.current;
-            if (keyboard == null || IsLocked)
+            if (keyboard == null)
+            {
+                return;
+            }
+
+            if (keyboard.spaceKey.wasPressedThisFrame)
+            {
+                FocusRequested?.Invoke();
+            }
+
+            if (keyboard.tabKey.wasPressedThisFrame && IsMultiLocal)
+            {
+                SelectNextLocalUnit();
+            }
+
+            if (IsLocked)
             {
                 return;
             }
@@ -295,38 +459,109 @@ namespace BigProject.Client
             }
         }
 
-        private void OnCellClicked(GridPosition cell)
+        /// <summary>Partage le brouillon avec les alliés (au plus 10 fois par seconde) et rafraîchit leur aperçu.</summary>
+        private void SyncDraftAndAllies()
         {
-            if (IsLocked)
+            if (resolutionPlayer.IsPlaying || session.State.Phase != MatchPhase.Planning)
             {
                 return;
             }
 
-            switch (Tool)
+            if (draftDirty && Time.unscaledTime - lastDraftSent >= 0.1f)
             {
-                case PlanningTool.Select:
-                    UnitState clicked = session.State.GetUnitAt(cell);
-                    if (clicked != null && IsControlledLocally(clicked))
-                    {
-                        SelectUnit(clicked.Id);
-                    }
+                draftDirty = false;
+                lastDraftSent = Time.unscaledTime;
 
-                    break;
-                case PlanningTool.Move:
-                    UnitState friendly = session.State.GetUnitAt(cell);
-                    if (friendly != null && IsControlledLocally(friendly) && friendly.Id != SelectedUnitId)
+                var unitPlans = new List<UnitPlan>();
+                foreach (UnitState unit in session.State.Units)
+                {
+                    if (unit.IsAlive && IsControlledLocally(unit) && !submittedPlayers.Contains(unit.PlayerId))
                     {
-                        SelectUnit(friendly.Id);
+                        unitPlans.Add(new UnitPlan(unit.Id, GetDraft(unit.Id)));
                     }
-                    else
-                    {
-                        TryAddMove(cell);
-                    }
+                }
 
-                    break;
-                case PlanningTool.Spell:
-                    TryAddCast(cell);
-                    break;
+                if (unitPlans.Count > 0)
+                {
+                    session.SendDraft(unitPlans);
+                }
+            }
+
+            if (Time.unscaledTime >= nextAllyRefresh)
+            {
+                nextAllyRefresh = Time.unscaledTime + 0.2f;
+                UpdateAllyLayers();
+            }
+        }
+
+        /// <summary>
+        /// Montre ce que font les alliés à l'action courante : leur trajet, ou la zone de leur sort dans une
+        /// couleur différente de la nôtre. Leurs autres actions restent masquées pour garder la lisibilité.
+        /// </summary>
+        private void UpdateAllyLayers()
+        {
+            var moveCells = new List<GridPosition>();
+            var castCells = new List<GridPosition>();
+
+            foreach (AllyPreview preview in GetAllyPreviews())
+            {
+                if (preview.CurrentOrder is MoveOrder move)
+                {
+                    moveCells.AddRange(move.Path);
+                }
+                else if (preview.CurrentOrder is CastOrder cast)
+                {
+                    SpellDefinition spell = session.Spells.Get(cast.SpellId);
+                    if (spell != null)
+                    {
+                        castCells.AddRange(SpellArea.GetCells(session.State.Map, spell.AreaShape, spell.AreaRadius, cast.Target));
+                    }
+                }
+            }
+
+            highlighter.Set(HighlightLayer.AllyMove, moveCells);
+            highlighter.Set(HighlightLayer.AllyCast, castCells);
+        }
+
+        private void SelectFirstLocalUnit()
+        {
+            foreach (UnitState unit in session.State.Units)
+            {
+                if (unit.IsAlive && IsControlledLocally(unit))
+                {
+                    SelectedUnitId = unit.Id;
+                    Tool = PlanningTool.Move;
+                    units.SetSelected(unit.Id);
+                    Message = unit.Name + " : planifie tes actions puis confirme.";
+                    return;
+                }
+            }
+        }
+
+        private void OnCellClicked(GridPosition cell)
+        {
+            UnitState clicked = session.State.GetUnitAt(cell);
+            bool clickedLocalUnit = clicked != null && IsControlledLocally(clicked);
+
+            // Cliquer une autre de ses unités la sélectionne (sauf pour la cibler avec un sort).
+            if (clickedLocalUnit && Tool != PlanningTool.Spell && (clicked.Id != SelectedUnitId || Tool == PlanningTool.Select))
+            {
+                SelectUnit(clicked.Id);
+                return;
+            }
+
+            if (IsLocked || Tool == PlanningTool.Select)
+            {
+                return;
+            }
+
+            if (Tool == PlanningTool.Move)
+            {
+                TryAddMove(cell);
+            }
+            else
+            {
+                TryAddCast(cell);
             }
         }
 
@@ -354,7 +589,10 @@ namespace BigProject.Client
                 return;
             }
 
-            TryAppend(unit, new MoveOrder(path), "Déplacement de " + path.Count + " case(s) ajouté.");
+            if (TryAppend(unit, new MoveOrder(path), "Déplacement de " + path.Count + " case(s) ajouté."))
+            {
+                FocusRequested?.Invoke();
+            }
         }
 
         private void TryAddCast(GridPosition target)
@@ -370,24 +608,26 @@ namespace BigProject.Client
             TryAppend(unit, new CastOrder(ActiveSpellId, target), spell.DisplayName + " ajouté.");
         }
 
-        private void TryAppend(UnitState unit, UnitOrder order, string successMessage)
+        private bool TryAppend(UnitState unit, UnitOrder order, string successMessage)
         {
             var candidate = new List<UnitOrder>(GetDraft(unit.Id)) { order };
             PlanProjection projection = PlanValidator.Project(session.State, session.Spells, unit, candidate);
             if (!projection.IsValid)
             {
                 Message = projection.Error;
-                return;
+                return false;
             }
 
             drafts[unit.Id] = candidate;
+            draftDirty = true;
             Message = successMessage;
             RefreshHighlights();
+            return true;
         }
 
         private void OnPlanRejected(string reason)
         {
-            submitted = false;
+            submittedPlayers.Clear();
             Message = "Plan refusé par le serveur : " + reason;
             RefreshHighlights();
         }
@@ -395,7 +635,7 @@ namespace BigProject.Client
         private void OnRoundResolved(RoundResult result)
         {
             drafts.Clear();
-            submitted = false;
+            submittedPlayers.Clear();
             Message = "Tour " + result.RoundNumber + " résolu.";
             if (result.RejectedPlans.Count > 0)
             {
@@ -409,13 +649,20 @@ namespace BigProject.Client
                     : "Match terminé : victoire de l'équipe " + (result.WinnerTeamId == MatchFactory.TeamBlue ? "bleue" : "rouge") + ".";
             }
 
+            UnitState selected = SelectedUnit;
+            if (selected == null || !selected.IsAlive)
+            {
+                SelectNextLocalUnit();
+            }
+
             highlighter.ClearAll();
+            FocusRequested?.Invoke();
         }
 
         private void RefreshHighlights()
         {
             highlighter.ClearAll();
-            if (IsLocked)
+            if (resolutionPlayer.IsPlaying)
             {
                 return;
             }
@@ -439,9 +686,10 @@ namespace BigProject.Client
 
             highlighter.Set(HighlightLayer.PlannedMove, plannedMoves);
             highlighter.Set(HighlightLayer.PlannedCast, plannedCasts);
+            UpdateAllyLayers();
 
             UnitState unit = SelectedUnit;
-            if (unit == null)
+            if (unit == null || IsLocked)
             {
                 return;
             }

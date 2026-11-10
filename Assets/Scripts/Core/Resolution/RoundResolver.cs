@@ -8,25 +8,33 @@ using BigProject.Core.Units;
 namespace BigProject.Core.Resolution
 {
     /// <summary>
-    /// Résout un tour complet à partir des plans de tous les joueurs.
+    /// Résout un tour complet à partir des plans de tous les joueurs, action par action.
     ///
-    /// Le tour est découpé en étapes : à l'étape N, chaque unité exécute sa N-ième action en même temps
-    /// que les autres. Dans une étape, les déplacements se font d'abord (case par case, simultanément),
-    /// puis tous les sorts partent ensemble sur les positions obtenues : viser la case où l'ennemi va
-    /// arriver est donc possible. Le résultat est une suite de "beats" que le client rejoue.
+    /// À l'action N, chaque unité exécute sa N-ième action en même temps que les autres :
+    /// - les déplacements avancent case par case, simultanément ;
+    /// - les sorts sont lancés dès le début de l'action, en même temps que les déplacements ;
+    /// - leur impact est calculé à la fin de l'action sur les positions d'arrivée : marcher hors de la zone
+    ///   dans la même action évite les dégâts, viser la case où l'ennemi va arriver le touche.
     ///
-    /// Déterministe : aucun aléatoire, unités toujours parcourues par identifiant croissant.
+    /// Une unité dont une action est perturbée (déplacement bloqué, sort impossible) est interrompue :
+    /// toutes ses actions suivantes sont annulées. Un allié qui comptait traverser la case où elle s'est
+    /// arrêtée est donc bloqué à son tour, et ainsi de suite.
+    ///
+    /// Le seul hasard (priorité entre deux unités qui visent la même case) vient du Random fourni : à graine
+    /// égale, le résultat est identique.
     /// </summary>
     public sealed class RoundResolver
     {
         private readonly SpellCatalog spells;
         private readonly SpellResolver spellResolver;
         private readonly IVictoryCondition victoryCondition;
+        private readonly Random random;
 
-        public RoundResolver(SpellCatalog spells, IVictoryCondition victoryCondition)
+        public RoundResolver(SpellCatalog spells, IVictoryCondition victoryCondition, Random random = null)
         {
             this.spells = spells;
             this.victoryCondition = victoryCondition;
+            this.random = random ?? new Random();
             spellResolver = new SpellResolver(spells);
         }
 
@@ -40,6 +48,7 @@ namespace BigProject.Core.Resolution
             state.Phase = MatchPhase.Resolving;
             var result = new RoundResult(state.RoundNumber);
             SortedDictionary<int, IReadOnlyList<UnitOrder>> ordersByUnit = CollectValidOrders(state, plans, result);
+            var interrupted = new HashSet<int>();
 
             int stepCount = 0;
             foreach (KeyValuePair<int, IReadOnlyList<UnitOrder>> pair in ordersByUnit)
@@ -49,33 +58,7 @@ namespace BigProject.Core.Resolution
 
             for (int step = 0; step < stepCount; step++)
             {
-                var moves = new List<PendingMove>();
-                var casts = new List<PendingCast>();
-
-                foreach (KeyValuePair<int, IReadOnlyList<UnitOrder>> pair in ordersByUnit)
-                {
-                    UnitState unit = state.GetUnit(pair.Key);
-                    if (!unit.IsAlive || step >= pair.Value.Count)
-                    {
-                        continue;
-                    }
-
-                    UnitOrder order = pair.Value[step];
-                    if (order is MoveOrder move)
-                    {
-                        moves.Add(new PendingMove(unit.Id, move.Path));
-                    }
-                    else if (order is CastOrder cast)
-                    {
-                        casts.Add(new PendingCast(unit.Id, cast));
-                    }
-                }
-
-                MovementResolver.Resolve(state, moves, result.Beats);
-                if (casts.Count > 0)
-                {
-                    result.Beats.Add(spellResolver.Resolve(state, casts));
-                }
+                ResolveStep(state, ordersByUnit, interrupted, step, result);
 
                 if (victoryCondition.IsMatchOver(state, out _))
                 {
@@ -85,6 +68,79 @@ namespace BigProject.Core.Resolution
 
             FinishRound(state, result);
             return result;
+        }
+
+        private void ResolveStep(
+            MatchState state,
+            SortedDictionary<int, IReadOnlyList<UnitOrder>> ordersByUnit,
+            HashSet<int> interrupted,
+            int step,
+            RoundResult result)
+        {
+            var moves = new List<PendingMove>();
+            var casts = new List<PendingCast>();
+
+            foreach (KeyValuePair<int, IReadOnlyList<UnitOrder>> pair in ordersByUnit)
+            {
+                UnitState unit = state.GetUnit(pair.Key);
+                if (!unit.IsAlive || interrupted.Contains(unit.Id) || step >= pair.Value.Count)
+                {
+                    continue;
+                }
+
+                UnitOrder order = pair.Value[step];
+                if (order is MoveOrder move)
+                {
+                    moves.Add(new PendingMove(unit.Id, move.Path));
+                }
+                else if (order is CastOrder cast)
+                {
+                    casts.Add(new PendingCast(unit.Id, cast));
+                }
+            }
+
+            int firstBeat = result.Beats.Count;
+            MovementResolver.Resolve(state, moves, result.Beats, random);
+            int lastBeat = result.Beats.Count - 1;
+
+            foreach (PendingMove move in moves)
+            {
+                if (move.Stopped)
+                {
+                    interrupted.Add(move.UnitId);
+                }
+            }
+
+            if (casts.Count > 0)
+            {
+                // Les lanceurs ne bougent pas pendant leur action : le lancement peut donc être validé
+                // avant la fin des déplacements, mais l'impact doit attendre les positions d'arrivée.
+                var castBeat = new ResolutionBeat();
+                var fizzled = new List<int>();
+                List<ActiveCast> active = spellResolver.BeginCasts(state, casts, castBeat, fizzled);
+                interrupted.UnionWith(fizzled);
+
+                var impactBeat = new ResolutionBeat();
+                spellResolver.ApplyImpacts(state, active, impactBeat);
+
+                if (lastBeat < firstBeat)
+                {
+                    var single = new ResolutionBeat();
+                    single.Events.AddRange(castBeat.Events);
+                    single.Events.AddRange(impactBeat.Events);
+                    result.Beats.Add(single);
+                }
+                else
+                {
+                    result.Beats[firstBeat].Events.InsertRange(0, castBeat.Events);
+                    result.Beats[lastBeat].Events.AddRange(impactBeat.Events);
+                }
+            }
+
+            for (int i = firstBeat; i < result.Beats.Count; i++)
+            {
+                result.Beats[i].StepIndex = step;
+            }
         }
 
         private SortedDictionary<int, IReadOnlyList<UnitOrder>> CollectValidOrders(

@@ -15,10 +15,13 @@ namespace BigProject.Core.Net
         public int PlayersPerTeam { get; set; } = 3;
 
         /// <summary>Durée de la phase de planification annoncée aux clients, 0 pour illimitée.</summary>
-        public float PlanningSeconds { get; set; } = 45f;
+        public float PlanningSeconds { get; set; } = 20f;
 
         /// <summary>Marge ajoutée côté serveur pour laisser aux clients le temps d'envoyer leur plan final.</summary>
         public float GraceSeconds { get; set; } = 1.5f;
+
+        /// <summary>Carte des matchs ; null pour la carte par défaut du jeu.</summary>
+        public MapDefinition Map { get; set; }
     }
 
     /// <summary>
@@ -36,6 +39,10 @@ namespace BigProject.Core.Net
         private readonly Dictionary<int, ClientSlot> clients = new Dictionary<int, ClientSlot>();
         private readonly List<ClientSlot> queue = new List<ClientSlot>();
         private readonly List<Room> rooms = new List<Room>();
+        private double time;
+
+        /// <summary>Intervalle minimal entre deux brouillons d'un même joueur (anti-spam).</summary>
+        private const double MinDraftInterval = 0.05;
 
         public GameServer(IServerTransport transport, ServerSettings settings, SpellCatalog spells, Random random = null)
         {
@@ -48,7 +55,8 @@ namespace BigProject.Core.Net
             this.settings = settings;
             this.spells = spells;
             this.random = random ?? new Random();
-            resolver = new RoundResolver(spells, new LastTeamStandingCondition());
+            // Le hasard de la résolution (priorité en cas de collision) vient du serveur, jamais d'un client.
+            resolver = new RoundResolver(spells, new LastTeamStandingCondition(), new Random(this.random.Next()));
 
             transport.MessageReceived += OnMessage;
             transport.ClientDisconnected += OnDisconnected;
@@ -61,6 +69,7 @@ namespace BigProject.Core.Net
         /// <summary>À appeler à chaque frame : fait avancer les chronos de planification.</summary>
         public void Update(float deltaSeconds)
         {
+            time += deltaSeconds;
             foreach (Room room in new List<Room>(rooms))
             {
                 room.Match.Tick(deltaSeconds);
@@ -93,6 +102,9 @@ namespace BigProject.Core.Net
                     break;
                 case SubmitPlanMessage submit:
                     HandleSubmitPlan(slot, submit);
+                    break;
+                case DraftMessage draft:
+                    HandleDraft(slot, draft);
                     break;
                 default:
                     Kick(connectionId, "Message inattendu.");
@@ -128,10 +140,96 @@ namespace BigProject.Core.Net
             }
 
             // Le joueur est toujours déduit de la connexion, jamais du contenu du message.
+            Room room = slot.Room;
+            int round = room.Match.State.RoundNumber;
             var plan = new TurnPlan(slot.PlayerId, submit.Units);
-            if (!slot.Room.Match.TrySubmitPlan(plan, out string error))
+            if (!room.Match.TrySubmitPlan(plan, out string error))
             {
                 Send(slot, new PlanRejectedMessage(error));
+                return;
+            }
+
+            BroadcastPlanStatus(room, round);
+        }
+
+        /// <summary>
+        /// Relaie le brouillon d'un joueur à ses alliés, jamais aux ennemis. Seules les entrées valides,
+        /// pour des unités du joueur, sont relayées.
+        /// </summary>
+        private void HandleDraft(ClientSlot slot, DraftMessage draft)
+        {
+            Room room = slot.Room;
+            if (room == null || room.Match.State.Phase != MatchPhase.Planning ||
+                room.Match.HasSubmitted(slot.PlayerId) || time - slot.LastDraftTime < MinDraftInterval)
+            {
+                return;
+            }
+
+            slot.LastDraftTime = time;
+            MatchState state = room.Match.State;
+            var valid = new List<UnitPlan>();
+            int team = MatchState.NoTeam;
+
+            foreach (UnitPlan unitPlan in draft.Units)
+            {
+                UnitState unit = state.GetUnit(unitPlan.UnitId);
+                if (unit == null || unit.PlayerId != slot.PlayerId || !unit.IsAlive)
+                {
+                    continue;
+                }
+
+                if (PlanValidator.Project(state, spells, unit, unitPlan.Orders).IsValid)
+                {
+                    valid.Add(unitPlan);
+                    team = unit.TeamId;
+                }
+            }
+
+            if (valid.Count == 0)
+            {
+                return;
+            }
+
+            byte[] data = MessageCodec.Encode(new AllyDraftMessage(valid));
+            foreach (ClientSlot other in room.Clients)
+            {
+                if (other != slot && other.Connected && TeamOf(state, other.PlayerId) == team)
+                {
+                    transport.Send(other.ConnectionId, data);
+                }
+            }
+        }
+
+        private static int TeamOf(MatchState state, int playerId)
+        {
+            foreach (UnitState unit in state.Units)
+            {
+                if (unit.PlayerId == playerId)
+                {
+                    return unit.TeamId;
+                }
+            }
+
+            return MatchState.NoTeam;
+        }
+
+        /// <summary>Informe le match du nombre de joueurs prêts, si le tour n'a pas été résolu entre-temps.</summary>
+        private void BroadcastPlanStatus(Room room, int round)
+        {
+            if (!rooms.Contains(room) || room.Match.State.Phase != MatchPhase.Planning ||
+                room.Match.State.RoundNumber != round)
+            {
+                return;
+            }
+
+            byte[] data = MessageCodec.Encode(
+                new PlanStatusMessage(room.Match.ReadyPlayerCount, room.Match.ExpectedPlayerCount));
+            foreach (ClientSlot client in room.Clients)
+            {
+                if (client.Connected)
+                {
+                    transport.Send(client.ConnectionId, data);
+                }
             }
         }
 
@@ -149,7 +247,7 @@ namespace BigProject.Core.Net
 
         private void StartRoom(List<ClientSlot> players)
         {
-            MatchState state = MatchFactory.CreateTeamMatch(new MatchConfig(), spells, settings.PlayersPerTeam);
+            MatchState state = MatchFactory.CreateTeamMatch(new MatchConfig(), spells, settings.PlayersPerTeam, settings.Map);
             float timeout = settings.PlanningSeconds > 0f ? settings.PlanningSeconds + settings.GraceSeconds : 0f;
             var room = new Room { Match = new AuthoritativeMatch(state, resolver, timeout) };
             room.Match.RoundResolved += result => OnRoundResolved(room, result);
@@ -215,10 +313,15 @@ namespace BigProject.Core.Net
                 return;
             }
 
+            int roundBeforeDisconnect = room.Match.State.RoundNumber;
             room.Match.MarkDisconnected(slot.PlayerId);
             if (rooms.Contains(room) && !HasConnectedPlayerAlive(room))
             {
                 CloseRoom(room, "Tous les joueurs actifs ont quitté le match.");
+            }
+            else
+            {
+                BroadcastPlanStatus(room, roundBeforeDisconnect);
             }
         }
 
@@ -292,6 +395,7 @@ namespace BigProject.Core.Net
             public string Name;
             public Room Room;
             public int PlayerId;
+            public double LastDraftTime = -1;
             public bool Connected = true;
         }
 

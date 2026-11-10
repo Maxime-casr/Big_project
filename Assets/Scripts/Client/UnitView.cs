@@ -58,6 +58,12 @@ namespace BigProject.Client
             selection.gameObject.SetActive(selected);
         }
 
+        public void SetColor(Color color)
+        {
+            baseColor = color;
+            body.color = color;
+        }
+
         public void SetHealth(int health)
         {
             DisplayedHealth = health;

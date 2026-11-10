@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using BigProject.Core.Grid;
 using BigProject.Core.Match;
@@ -18,7 +19,7 @@ namespace BigProject.Tests
         public void SetUp()
         {
             spells = SpellCatalog.CreateDefault();
-            resolver = new RoundResolver(spells, new LastTeamStandingCondition());
+            resolver = new RoundResolver(spells, new LastTeamStandingCondition(), new Random(7));
         }
 
         private static GridPosition P(int x, int y)
@@ -63,7 +64,7 @@ namespace BigProject.Tests
         }
 
         [Test]
-        public void TwoUnitsTargetingSameCell_BothAreBlocked()
+        public void TwoUnitsTargetingSameCell_ExactlyOneGetsThrough()
         {
             MatchState state = NewState();
             UnitState a = AddUnit(state, 1, 0, P(1, 1));
@@ -75,8 +76,115 @@ namespace BigProject.Tests
                 Plan(2, 2, Move(P(2, 1)))
             });
 
+            bool aMoved = a.Position == P(2, 1);
+            bool bMoved = b.Position == P(2, 1);
+            Assert.IsTrue(aMoved ^ bMoved, "Une seule unité doit obtenir la case.");
+            Assert.AreEqual(aMoved ? P(3, 1) : P(1, 1), aMoved ? b.Position : a.Position, "L'autre reste sur place.");
+        }
+
+        [Test]
+        public void ContestedCell_PriorityIsRandomButBothOutcomesHappen()
+        {
+            int aWins = 0;
+            int bWins = 0;
+            for (int seed = 0; seed < 30; seed++)
+            {
+                MatchState state = NewState();
+                UnitState a = AddUnit(state, 1, 0, P(1, 1));
+                AddUnit(state, 2, 1, P(3, 1));
+                var seeded = new RoundResolver(spells, new LastTeamStandingCondition(), new Random(seed));
+
+                seeded.Resolve(state, new[] { Plan(1, 1, Move(P(2, 1))), Plan(2, 2, Move(P(2, 1))) });
+
+                if (a.Position == P(2, 1))
+                {
+                    aWins++;
+                }
+                else
+                {
+                    bWins++;
+                }
+            }
+
+            Assert.Greater(aWins, 0);
+            Assert.Greater(bWins, 0);
+        }
+
+        [Test]
+        public void UnitThatLosesTheContest_LosesItsFollowingActions()
+        {
+            MatchState state = NewState();
+            UnitState a = AddUnit(state, 1, 0, P(1, 1));
+            UnitState b = AddUnit(state, 2, 1, P(3, 1));
+
+            resolver.Resolve(state, new[]
+            {
+                Plan(1, 1, Move(P(2, 1)), new CastOrder("piercing_arrow", P(2, 5))),
+                Plan(2, 2, Move(P(2, 1)), new CastOrder("piercing_arrow", P(2, 5)))
+            });
+
+            int spent = (8 - a.Mana) + (8 - b.Mana);
+            Assert.AreEqual(2, spent, "Seul le gagnant lance son sort : le perdant est interrompu.");
+        }
+
+        [Test]
+        public void BlockedUnit_CancelsItsNextSpell()
+        {
+            MatchState state = NewState();
+            UnitState a = AddUnit(state, 1, 0, P(1, 1));
+            UnitState enemy = AddUnit(state, 2, 1, P(2, 1));
+
+            resolver.Resolve(state, new[]
+            {
+                Plan(1, 1, Move(P(2, 1)), new CastOrder("piercing_arrow", P(2, 1)))
+            });
+
             Assert.AreEqual(P(1, 1), a.Position);
-            Assert.AreEqual(P(3, 1), b.Position);
+            Assert.AreEqual(30, enemy.Health);
+            Assert.AreEqual(8, a.Mana, "Un sort annulé ne coûte pas de mana.");
+        }
+
+        [Test]
+        public void AllyBlockedByAnInterruptedAlly_IsInterruptedToo()
+        {
+            MatchState state = NewState();
+            UnitState first = AddUnit(state, 1, 0, P(1, 1));
+            UnitState behind = AddUnit(state, 2, 0, P(0, 1));
+            AddUnit(state, 3, 1, P(2, 1));
+
+            resolver.Resolve(state, new[]
+            {
+                Plan(1, 1, Move(P(2, 1))),
+                Plan(2, 2, Move(P(1, 1), P(2, 1)))
+            });
+
+            Assert.AreEqual(P(1, 1), first.Position);
+            Assert.AreEqual(P(0, 1), behind.Position, "L'allié derrière ne peut pas avancer sur la case restée occupée.");
+        }
+
+        [Test]
+        public void SpellIsCastWithTheFirstMovementAndImpactsWithTheLast()
+        {
+            MatchState state = NewState();
+            AddUnit(state, 1, 0, P(1, 1));
+            UnitState target = AddUnit(state, 2, 1, P(1, 4));
+            AddUnit(state, 3, 0, P(5, 5));
+
+            RoundResult result = resolver.Resolve(state, new[]
+            {
+                Plan(1, 1, new CastOrder("piercing_arrow", P(1, 4))),
+                Plan(3, 3, Move(P(6, 5), P(7, 5), P(8, 5)))
+            });
+
+            Assert.AreEqual(3, result.Beats.Count);
+            Assert.IsInstanceOf<SpellCastEvent>(result.Beats[0].Events[0]);
+            Assert.IsTrue(result.Beats[2].Events.Exists(e => e is UnitDamagedEvent));
+            Assert.IsFalse(result.Beats[0].Events.Exists(e => e is UnitDamagedEvent));
+            Assert.AreEqual(26, target.Health);
+            foreach (ResolutionBeat beat in result.Beats)
+            {
+                Assert.AreEqual(0, beat.StepIndex);
+            }
         }
 
         [Test]
@@ -174,8 +282,9 @@ namespace BigProject.Tests
             });
 
             Assert.AreEqual(30, target.Health);
-            Assert.IsInstanceOf<UnitMovedEvent>(result.Beats[0].Events[0]);
-            Assert.IsInstanceOf<SpellCastEvent>(result.Beats[1].Events[0]);
+            Assert.AreEqual(1, result.Beats.Count, "Un déplacement d'une case et un sort : un seul instant.");
+            Assert.IsInstanceOf<SpellCastEvent>(result.Beats[0].Events[0]);
+            Assert.IsTrue(result.Beats[0].Events.Exists(e => e is UnitMovedEvent));
         }
 
         [Test]
@@ -284,8 +393,8 @@ namespace BigProject.Tests
             AddUnit(first, 2, 1, P(2, 3));
             MatchState second = first.Clone();
 
-            resolver.Resolve(first, plans);
-            resolver.Resolve(second, plans);
+            new RoundResolver(spells, new LastTeamStandingCondition(), new Random(5)).Resolve(first, plans);
+            new RoundResolver(spells, new LastTeamStandingCondition(), new Random(5)).Resolve(second, plans);
 
             for (int i = 0; i < first.Units.Count; i++)
             {

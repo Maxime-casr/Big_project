@@ -6,6 +6,9 @@ namespace BigProject.Core.Resolution
     /// <summary>Un instant de la résolution : tous ses événements se produisent en même temps.</summary>
     public sealed class ResolutionBeat
     {
+        /// <summary>Numéro de l'action (0 = première) à laquelle appartient cet instant.</summary>
+        public int StepIndex { get; set; }
+
         public List<GameEvent> Events { get; } = new List<GameEvent>();
     }
 

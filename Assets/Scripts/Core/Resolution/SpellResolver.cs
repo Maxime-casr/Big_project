@@ -19,9 +19,27 @@ namespace BigProject.Core.Resolution
         public CastOrder Order { get; }
     }
 
+    /// <summary>Sort lancé avec succès dont les effets restent à appliquer.</summary>
+    public sealed class ActiveCast
+    {
+        public ActiveCast(UnitState caster, SpellDefinition spell, IReadOnlyList<GridPosition> cells)
+        {
+            Caster = caster;
+            Spell = spell;
+            Cells = cells;
+        }
+
+        public UnitState Caster { get; }
+        public SpellDefinition Spell { get; }
+        public IReadOnlyList<GridPosition> Cells { get; }
+    }
+
     /// <summary>
-    /// Résout tous les sorts d'une étape en même temps : les effets sont d'abord calculés
-    /// sur l'état courant, puis appliqués ensemble (un lanceur tué dans l'étape lance quand même son sort).
+    /// Résout les sorts d'une action en deux temps :
+    /// 1. le lancement (validation, mana, zone) a lieu au début de l'action, en même temps que les déplacements ;
+    /// 2. l'impact est calculé à la fin de l'action, sur les positions d'arrivée : quitter la zone en marchant
+    ///    dans la même action évite les dégâts.
+    /// Tous les effets d'une même action sont appliqués ensemble (un lanceur tué dans l'action lance quand même).
     /// </summary>
     public sealed class SpellResolver
     {
@@ -32,10 +50,14 @@ namespace BigProject.Core.Resolution
             this.spells = spells;
         }
 
-        public ResolutionBeat Resolve(MatchState state, IReadOnlyList<PendingCast> casts)
+        /// <summary>Valide et lance les sorts. Les lanceurs dont le sort échoue sont ajoutés à fizzledCasters.</summary>
+        public List<ActiveCast> BeginCasts(
+            MatchState state,
+            IReadOnlyList<PendingCast> casts,
+            ResolutionBeat beat,
+            List<int> fizzledCasters)
         {
-            var beat = new ResolutionBeat();
-            var impacts = new SortedDictionary<int, Impact>();
+            var active = new List<ActiveCast>();
 
             foreach (PendingCast pending in casts)
             {
@@ -43,34 +65,49 @@ namespace BigProject.Core.Resolution
                 CastOrder order = pending.Order;
                 SpellDefinition spell = spells.Get(order.SpellId);
 
+                string failure = null;
                 if (spell == null)
                 {
-                    beat.Events.Add(new SpellFizzledEvent(caster.Id, order.SpellId, order.Target, "Sort inconnu."));
-                    continue;
+                    failure = "Sort inconnu.";
+                }
+                else if (caster.Mana < spell.ManaCost)
+                {
+                    failure = "Mana insuffisant.";
+                }
+                else if (!SpellTargeting.CanTarget(state.Map, spell, caster.Position, order.Target, out string reason))
+                {
+                    failure = reason;
                 }
 
-                if (caster.Mana < spell.ManaCost)
+                if (failure != null)
                 {
-                    beat.Events.Add(new SpellFizzledEvent(caster.Id, spell.Id, order.Target, "Mana insuffisant."));
-                    continue;
-                }
-
-                if (!SpellTargeting.CanTarget(state.Map, spell, caster.Position, order.Target, out string reason))
-                {
-                    beat.Events.Add(new SpellFizzledEvent(caster.Id, spell.Id, order.Target, reason));
+                    beat.Events.Add(new SpellFizzledEvent(caster.Id, order.SpellId, order.Target, failure));
+                    fizzledCasters.Add(caster.Id);
                     continue;
                 }
 
                 caster.SpendMana(spell.ManaCost);
                 List<GridPosition> cells = SpellArea.GetCells(state.Map, spell.AreaShape, spell.AreaRadius, order.Target);
                 beat.Events.Add(new SpellCastEvent(caster.Id, spell.Id, order.Target, cells));
+                active.Add(new ActiveCast(caster, spell, cells));
+            }
 
-                foreach (SpellEffect effect in spell.Effects)
+            return active;
+        }
+
+        /// <summary>Applique les effets de tous les sorts lancés, sur les positions actuelles.</summary>
+        public void ApplyImpacts(MatchState state, List<ActiveCast> active, ResolutionBeat beat)
+        {
+            var impacts = new SortedDictionary<int, Impact>();
+
+            foreach (ActiveCast cast in active)
+            {
+                foreach (SpellEffect effect in cast.Spell.Effects)
                 {
-                    foreach (GridPosition cell in cells)
+                    foreach (GridPosition cell in cast.Cells)
                     {
                         UnitState victim = state.GetUnitAt(cell);
-                        if (victim == null || !Matches(effect.Targets, caster, victim))
+                        if (victim == null || !Matches(effect.Targets, cast.Caster, victim))
                         {
                             continue;
                         }
@@ -113,8 +150,6 @@ namespace BigProject.Core.Resolution
                     beat.Events.Add(new UnitDiedEvent(unit.Id));
                 }
             }
-
-            return beat;
         }
 
         private static bool Matches(TargetFilter filter, UnitState caster, UnitState victim)

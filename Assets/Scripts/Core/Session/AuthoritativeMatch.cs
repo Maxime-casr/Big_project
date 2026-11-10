@@ -26,10 +26,41 @@ namespace BigProject.Core.Session
             State = state;
             this.resolver = resolver;
             this.planningTimeoutSeconds = planningTimeoutSeconds;
-            timeRemaining = planningTimeoutSeconds;
+            timeRemaining = planningTimeoutSeconds > 0f
+                ? planningTimeoutSeconds + PlaybackTiming.InitialAllowanceSeconds
+                : 0f;
         }
 
         public MatchState State { get; }
+
+        /// <summary>Temps restant avant résolution forcée (inclut la marge d'animation), 0 si illimité.</summary>
+        public float TimeRemainingSeconds => planningTimeoutSeconds > 0f ? Math.Max(0f, timeRemaining) : 0f;
+
+        /// <summary>Joueurs ayant déjà validé leur tour.</summary>
+        public int ReadyPlayerCount => submittedPlans.Count;
+
+        public bool HasSubmitted(int playerId)
+        {
+            return submittedPlans.ContainsKey(playerId);
+        }
+
+        /// <summary>Joueurs encore attendus : en vie et connectés.</summary>
+        public int ExpectedPlayerCount
+        {
+            get
+            {
+                int count = 0;
+                foreach (int playerId in State.GetActivePlayerIds())
+                {
+                    if (!disconnectedPlayers.Contains(playerId))
+                    {
+                        count++;
+                    }
+                }
+
+                return count;
+            }
+        }
 
         public event Action<RoundResult> RoundResolved;
 
@@ -97,7 +128,9 @@ namespace BigProject.Core.Session
             var plans = new List<TurnPlan>(submittedPlans.Values);
             submittedPlans.Clear();
             RoundResult result = resolver.Resolve(State, plans);
-            timeRemaining = planningTimeoutSeconds;
+            timeRemaining = planningTimeoutSeconds > 0f
+                ? planningTimeoutSeconds + PlaybackTiming.Estimate(result)
+                : 0f;
             RoundResolved?.Invoke(result);
             return result;
         }

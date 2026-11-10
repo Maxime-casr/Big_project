@@ -16,7 +16,11 @@ namespace BigProject.Client
     /// </summary>
     public sealed class CombatBootstrap : MonoBehaviour
     {
+        [Tooltip("Durée de planification d'un tour pour le combat local de test.")]
+        [SerializeField] private float planningSeconds = 20f;
+
         private NetworkMatchSession onlineSession;
+        private LocalMatchSession localSession;
         private bool leaveRequested;
         private string leaveMessage;
 
@@ -52,6 +56,9 @@ namespace BigProject.Client
 
         private void Update()
         {
+            // Hors ligne, c'est ici que le chrono de planification avance.
+            localSession?.Tick(Time.unscaledDeltaTime);
+
             if (leaveRequested)
             {
                 leaveRequested = false;
@@ -74,7 +81,7 @@ namespace BigProject.Client
             leaveMessage = reason;
         }
 
-        private static IMatchSession CreateLocalTestSession(out IEnumerable<int> localPlayers)
+        private IMatchSession CreateLocalTestSession(out IEnumerable<int> localPlayers)
         {
             SpellCatalog spells = SpellCatalog.CreateDefault();
             MatchState match = MatchFactory.CreateDemo3v3(new MatchConfig(), spells);
@@ -90,7 +97,8 @@ namespace BigProject.Client
             }
 
             localPlayers = players;
-            return new LocalMatchSession(match, spells, resolver);
+            localSession = new LocalMatchSession(match, spells, resolver, planningSeconds, 1f);
+            return localSession;
         }
     }
 }

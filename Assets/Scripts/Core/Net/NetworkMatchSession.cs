@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using BigProject.Core.Match;
 using BigProject.Core.Orders;
 using BigProject.Core.Resolution;
 using BigProject.Core.Session;
 using BigProject.Core.Spells;
+using BigProject.Core.Units;
 
 namespace BigProject.Core.Net
 {
@@ -16,7 +18,9 @@ namespace BigProject.Core.Net
         private readonly IClientTransport transport;
         private readonly string playerName;
         private float planningRemaining;
+        private float planningSeconds;
         private bool hasConnected;
+        private readonly Dictionary<int, IReadOnlyList<UnitOrder>> allyDrafts = new Dictionary<int, IReadOnlyList<UnitOrder>>();
 
         public NetworkMatchSession(IClientTransport transport, SpellCatalog spells, string playerName)
         {
@@ -33,7 +37,15 @@ namespace BigProject.Core.Net
         public SpellCatalog Spells { get; }
         public int LocalPlayerId { get; private set; } = -1;
         public bool IsInMatch => State != null;
-        public float PlanningSecondsRemaining => planningRemaining;
+        public int PlansReady { get; private set; }
+        public int PlansExpected { get; private set; }
+
+        /// <summary>
+        /// Le chrono ne descend pas pendant que le client rejoue le tour précédent : il ne s'affiche
+        /// qu'à partir de la durée de planification annoncée (même règle que le serveur).
+        /// </summary>
+        public float PlanningSecondsRemaining =>
+            planningSeconds > 0f ? Math.Max(0f, Math.Min(planningSeconds, planningRemaining)) : 0f;
 
         public event Action<RoundResult> RoundResolved;
         public event Action<string> PlanRejected;
@@ -58,10 +70,23 @@ namespace BigProject.Core.Net
 
         public void Tick(float deltaSeconds)
         {
-            if (State != null && State.Phase == MatchPhase.Planning && planningRemaining > 0f)
+            if (State != null && State.Phase == MatchPhase.Planning && planningSeconds > 0f && planningRemaining > 0f)
             {
                 planningRemaining = Math.Max(0f, planningRemaining - deltaSeconds);
             }
+        }
+
+        public void SendDraft(IReadOnlyList<UnitPlan> units)
+        {
+            if (State != null && State.Phase == MatchPhase.Planning)
+            {
+                transport.Send(MessageCodec.Encode(new DraftMessage(units)));
+            }
+        }
+
+        public bool TryGetAllyDraft(int unitId, out IReadOnlyList<UnitOrder> orders)
+        {
+            return allyDrafts.TryGetValue(unitId, out orders);
         }
 
         private void OnConnected()
@@ -98,7 +123,7 @@ namespace BigProject.Core.Net
                 case MatchStartedMessage started:
                     State = started.Snapshot.CreateState();
                     LocalPlayerId = started.LocalPlayerId;
-                    StartPlanningTimer(started.PlanningSeconds);
+                    StartPlanningTimer(started.PlanningSeconds, PlaybackTiming.InitialAllowanceSeconds);
                     MatchStarted?.Invoke();
                     break;
 
@@ -109,8 +134,30 @@ namespace BigProject.Core.Net
                     }
 
                     resolved.Snapshot.ApplyTo(State);
-                    StartPlanningTimer(resolved.PlanningSeconds);
+                    StartPlanningTimer(resolved.PlanningSeconds, PlaybackTiming.Estimate(resolved.Result));
                     RoundResolved?.Invoke(resolved.Result);
+                    break;
+
+                case PlanStatusMessage status:
+                    PlansReady = status.Ready;
+                    PlansExpected = status.Expected;
+                    break;
+
+                case AllyDraftMessage ally:
+                    if (State == null || State.Phase != MatchPhase.Planning)
+                    {
+                        break;
+                    }
+
+                    foreach (UnitPlan unitPlan in ally.Units)
+                    {
+                        UnitState unit = State.GetUnit(unitPlan.UnitId);
+                        if (unit != null && unit.PlayerId != LocalPlayerId)
+                        {
+                            allyDrafts[unitPlan.UnitId] = unitPlan.Orders;
+                        }
+                    }
+
                     break;
 
                 case PlanRejectedMessage rejected:
@@ -123,9 +170,13 @@ namespace BigProject.Core.Net
             }
         }
 
-        private void StartPlanningTimer(float seconds)
+        private void StartPlanningTimer(float seconds, float playbackAllowance)
         {
-            planningRemaining = seconds;
+            planningSeconds = seconds;
+            planningRemaining = seconds > 0f ? seconds + playbackAllowance : 0f;
+            PlansReady = 0;
+            PlansExpected = State.GetActivePlayerIds().Count;
+            allyDrafts.Clear();
         }
     }
 }

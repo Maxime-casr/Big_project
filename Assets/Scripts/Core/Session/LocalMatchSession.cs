@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using BigProject.Core.Match;
 using BigProject.Core.Orders;
 using BigProject.Core.Resolution;
@@ -13,17 +14,43 @@ namespace BigProject.Core.Session
     public sealed class LocalMatchSession : IMatchSession
     {
         private readonly AuthoritativeMatch match;
+        private readonly float planningSeconds;
+        private readonly float graceSeconds;
 
-        public LocalMatchSession(MatchState state, SpellCatalog spells, RoundResolver resolver)
+        /// <param name="planningSeconds">Durée de planification affichée au joueur, 0 pour illimitée.</param>
+        /// <param name="graceSeconds">Marge de la résolution forcée, pour laisser le temps d'envoyer le plan final.</param>
+        public LocalMatchSession(
+            MatchState state,
+            SpellCatalog spells,
+            RoundResolver resolver,
+            float planningSeconds = 0f,
+            float graceSeconds = 1f)
         {
             Spells = spells;
-            match = new AuthoritativeMatch(state, resolver);
+            this.planningSeconds = planningSeconds;
+            this.graceSeconds = graceSeconds;
+            float timeout = planningSeconds > 0f ? planningSeconds + graceSeconds : 0f;
+            match = new AuthoritativeMatch(state, resolver, timeout);
             match.RoundResolved += result => RoundResolved?.Invoke(result);
         }
 
         public MatchState State => match.State;
         public SpellCatalog Spells { get; }
-        public float PlanningSecondsRemaining => 0f;
+        public int PlansReady => match.ReadyPlayerCount;
+        public int PlansExpected => match.ExpectedPlayerCount;
+
+        public float PlanningSecondsRemaining
+        {
+            get
+            {
+                if (planningSeconds <= 0f)
+                {
+                    return 0f;
+                }
+
+                return Math.Max(0f, Math.Min(planningSeconds, match.TimeRemainingSeconds - graceSeconds));
+            }
+        }
 
         public event Action<RoundResult> RoundResolved;
 
@@ -37,6 +64,23 @@ namespace BigProject.Core.Session
         public bool TrySubmitPlan(TurnPlan plan, out string error)
         {
             return match.TrySubmitPlan(plan, out error);
+        }
+
+        // Hors ligne, tous les joueurs sont locaux : leurs brouillons sont déjà connus du client.
+        public void SendDraft(IReadOnlyList<UnitPlan> units)
+        {
+        }
+
+        public bool TryGetAllyDraft(int unitId, out IReadOnlyList<UnitOrder> orders)
+        {
+            orders = null;
+            return false;
+        }
+
+        /// <summary>À appeler à chaque frame pour faire avancer le chrono de planification.</summary>
+        public void Tick(float deltaSeconds)
+        {
+            match.Tick(deltaSeconds);
         }
 
         public RoundResult ResolveNow()

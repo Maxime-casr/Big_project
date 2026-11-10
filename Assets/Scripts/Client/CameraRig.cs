@@ -1,61 +1,123 @@
 using System;
-using BigProject.Core.Grid;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace BigProject.Client
 {
-    /// <summary>Cadre la caméra orthographique sur la grille, à gauche du panneau d'interface.</summary>
+    /// <summary>
+    /// Caméra orthographique de combat. Par défaut elle suit le personnage contrôlé (ou son fantôme pendant
+    /// la planification). Le déplacer depuis la minimap la détache ; Espace, un nouveau pas ou un changement
+    /// de joueur la recolle. La molette règle le zoom.
+    /// </summary>
     [RequireComponent(typeof(Camera))]
     public sealed class CameraRig : MonoBehaviour
     {
-        private const float Margin = 0.75f;
+        private const float DefaultSize = 3.8f;
+        private const float MinSize = 2.5f;
+        private const float MaxSize = 7f;
+        private const float Margin = 0.5f;
+        private const float SmoothTime = 0.15f;
 
         private Camera cam;
-        private GridMap map;
-        private Func<float> panelWidthProvider;
-        private int lastWidth;
-        private int lastHeight;
-        private float lastPanel;
+        private BoardView board;
+        private Func<Vector3?> followTarget;
+        private Func<bool> isPointerOverUi;
+        private Vector3 focus;
+        private Vector3 velocity;
+        private bool following = true;
 
-        public void Init(GridMap gridMap, Func<float> panelWidthInPixels)
+        public bool IsFollowing => following;
+
+        /// <summary>Zone du monde actuellement visible (pour le cadre de la minimap).</summary>
+        public Rect VisibleWorldRect
+        {
+            get
+            {
+                float halfHeight = cam.orthographicSize;
+                float halfWidth = halfHeight * cam.aspect;
+                Vector3 position = transform.position;
+                return new Rect(position.x - halfWidth, position.y - halfHeight, halfWidth * 2f, halfHeight * 2f);
+            }
+        }
+
+        public void Init(BoardView boardView, Func<Vector3?> followTargetProvider, Func<bool> pointerOverUi)
         {
             cam = GetComponent<Camera>();
-            map = gridMap;
-            panelWidthProvider = panelWidthInPixels;
+            board = boardView;
+            followTarget = followTargetProvider;
+            isPointerOverUi = pointerOverUi;
+
             cam.orthographic = true;
             cam.backgroundColor = new Color(0.07f, 0.08f, 0.11f);
-            Apply();
+            cam.orthographicSize = DefaultSize;
+
+            Vector3? target = followTarget();
+            focus = target ?? Vector3.zero;
+            transform.position = ClampToBoard(new Vector3(focus.x, focus.y, -10f));
+            following = true;
+        }
+
+        /// <summary>Recolle la caméra sur le personnage contrôlé.</summary>
+        public void Recenter()
+        {
+            following = true;
+        }
+
+        /// <summary>Déplace la caméra librement (minimap) : elle cesse de suivre le personnage.</summary>
+        public void FocusOn(Vector3 world)
+        {
+            following = false;
+            focus = world;
         }
 
         private void LateUpdate()
         {
-            if (map == null)
+            if (board == null)
             {
                 return;
             }
 
-            if (Screen.width != lastWidth || Screen.height != lastHeight ||
-                !Mathf.Approximately(panelWidthProvider(), lastPanel))
+            HandleZoom();
+
+            if (following)
             {
-                Apply();
+                Vector3? target = followTarget();
+                if (target.HasValue)
+                {
+                    focus = target.Value;
+                }
+            }
+
+            Vector3 desired = ClampToBoard(new Vector3(focus.x, focus.y, -10f));
+            transform.position = Vector3.SmoothDamp(transform.position, desired, ref velocity, SmoothTime);
+        }
+
+        private void HandleZoom()
+        {
+            Mouse mouse = Mouse.current;
+            if (mouse == null || (isPointerOverUi != null && isPointerOverUi()))
+            {
+                return;
+            }
+
+            float scroll = mouse.scroll.ReadValue().y;
+            if (Mathf.Abs(scroll) > 0.01f)
+            {
+                cam.orthographicSize = Mathf.Clamp(cam.orthographicSize - Mathf.Sign(scroll) * 0.4f, MinSize, MaxSize);
             }
         }
 
-        private void Apply()
+        private Vector3 ClampToBoard(Vector3 position)
         {
-            lastWidth = Screen.width;
-            lastHeight = Screen.height;
-            lastPanel = panelWidthProvider();
+            float halfHeight = cam.orthographicSize;
+            float halfWidth = halfHeight * cam.aspect;
+            float boardHalfWidth = board.Map.Width / 2f + Margin;
+            float boardHalfHeight = board.Map.Height / 2f + Margin;
 
-            float viewWidth = Mathf.Max(1f, lastWidth - lastPanel);
-            float aspect = viewWidth / Mathf.Max(1f, lastHeight);
-            float halfHeight = map.Height / 2f + Margin;
-            float halfWidth = (map.Width / 2f + Margin) / aspect;
-            cam.orthographicSize = Mathf.Max(halfHeight, halfWidth);
-
-            // Décale la caméra pour centrer la grille dans la zone laissée libre par le panneau.
-            float worldPerPixel = cam.orthographicSize * 2f / lastHeight;
-            transform.position = new Vector3(lastPanel * 0.5f * worldPerPixel, 0f, -10f);
+            // Si la vue dépasse la carte, on la centre ; sinon on l'empêche de sortir.
+            position.x = halfWidth >= boardHalfWidth ? 0f : Mathf.Clamp(position.x, -boardHalfWidth + halfWidth, boardHalfWidth - halfWidth);
+            position.y = halfHeight >= boardHalfHeight ? 0f : Mathf.Clamp(position.y, -boardHalfHeight + halfHeight, boardHalfHeight - halfHeight);
+            return position;
         }
     }
 }

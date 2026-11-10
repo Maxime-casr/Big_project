@@ -9,13 +9,16 @@ namespace BigProject.Core.Net
         // Client -> serveur
         Hello = 1,
         SubmitPlan = 2,
+        Draft = 3,
 
         // Serveur -> client
         QueueStatus = 10,
         MatchStarted = 11,
         RoundResolved = 12,
         PlanRejected = 13,
-        ServerError = 14
+        ServerError = 14,
+        PlanStatus = 15,
+        AllyDraft = 16
     }
 
     public abstract class NetMessage
@@ -136,6 +139,53 @@ namespace BigProject.Core.Net
         }
     }
 
+    /// <summary>
+    /// Brouillon des actions d'un joueur, envoyé pendant qu'il planifie. Le serveur ne le relaie qu'aux
+    /// alliés (jamais aux ennemis) ; ce n'est pas un plan validé.
+    /// </summary>
+    public sealed class DraftMessage : NetMessage
+    {
+        public DraftMessage(IReadOnlyList<UnitPlan> units)
+        {
+            Units = units;
+        }
+
+        public IReadOnlyList<UnitPlan> Units { get; }
+        public override MessageType Type => MessageType.Draft;
+
+        internal override void Write(NetWriter writer)
+        {
+            new SubmitPlanMessage(Units).Write(writer);
+        }
+
+        internal static DraftMessage Read(NetReader reader)
+        {
+            return new DraftMessage(SubmitPlanMessage.Read(reader).Units);
+        }
+    }
+
+    /// <summary>Brouillon d'un allié, relayé par le serveur à son équipe uniquement.</summary>
+    public sealed class AllyDraftMessage : NetMessage
+    {
+        public AllyDraftMessage(IReadOnlyList<UnitPlan> units)
+        {
+            Units = units;
+        }
+
+        public IReadOnlyList<UnitPlan> Units { get; }
+        public override MessageType Type => MessageType.AllyDraft;
+
+        internal override void Write(NetWriter writer)
+        {
+            new SubmitPlanMessage(Units).Write(writer);
+        }
+
+        internal static AllyDraftMessage Read(NetReader reader)
+        {
+            return new AllyDraftMessage(SubmitPlanMessage.Read(reader).Units);
+        }
+    }
+
     public sealed class QueueStatusMessage : NetMessage
     {
         public QueueStatusMessage(int waiting, int needed)
@@ -237,6 +287,31 @@ namespace BigProject.Core.Net
         internal static PlanRejectedMessage Read(NetReader reader)
         {
             return new PlanRejectedMessage(reader.ReadReason());
+        }
+    }
+
+    /// <summary>Progression de la planification : combien de joueurs ont validé leur tour.</summary>
+    public sealed class PlanStatusMessage : NetMessage
+    {
+        public PlanStatusMessage(int ready, int expected)
+        {
+            Ready = ready;
+            Expected = expected;
+        }
+
+        public int Ready { get; }
+        public int Expected { get; }
+        public override MessageType Type => MessageType.PlanStatus;
+
+        internal override void Write(NetWriter writer)
+        {
+            writer.WriteInt(Ready);
+            writer.WriteInt(Expected);
+        }
+
+        internal static PlanStatusMessage Read(NetReader reader)
+        {
+            return new PlanStatusMessage(reader.ReadInt(), reader.ReadInt());
         }
     }
 

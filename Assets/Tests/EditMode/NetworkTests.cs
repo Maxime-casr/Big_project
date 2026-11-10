@@ -5,6 +5,7 @@ using BigProject.Core.Match;
 using BigProject.Core.Net;
 using BigProject.Core.Orders;
 using BigProject.Core.Resolution;
+using BigProject.Core.Session;
 using BigProject.Core.Spells;
 using BigProject.Core.Units;
 using NUnit.Framework;
@@ -230,13 +231,67 @@ namespace BigProject.Tests
             int resolved = 0;
             a.session.RoundResolved += _ => resolved++;
 
-            server.Update(5f);
+            server.Update(10f);
             Assert.AreEqual(0, resolved);
 
-            server.Update(6.5f);
+            server.Update(5f);
 
             Assert.AreEqual(1, resolved);
             Assert.AreEqual(2, b.session.State.RoundNumber);
+        }
+
+        [Test]
+        public void PlanStatus_IsSharedWithEveryoneInTheMatch()
+        {
+            var a = Join("A");
+            var b = Join("B");
+            Assert.AreEqual(2, a.session.PlansExpected);
+            Assert.AreEqual(0, a.session.PlansReady);
+
+            a.session.TrySubmitPlan(new TurnPlan(a.session.LocalPlayerId, new UnitPlan[0]), out _);
+
+            Assert.AreEqual(1, a.session.PlansReady);
+            Assert.AreEqual(1, b.session.PlansReady);
+            Assert.AreEqual(2, b.session.PlansExpected);
+
+            b.session.TrySubmitPlan(new TurnPlan(b.session.LocalPlayerId, new UnitPlan[0]), out _);
+
+            Assert.AreEqual(0, a.session.PlansReady, "Le compteur repart à zéro au tour suivant.");
+        }
+
+        [Test]
+        public void ClientTimer_StaysFullDuringPlaybackThenCountsDown()
+        {
+            var a = Join("A");
+            var b = Join("B");
+            a.session.TrySubmitPlan(new TurnPlan(a.session.LocalPlayerId, new UnitPlan[0]), out _);
+            b.session.TrySubmitPlan(new TurnPlan(b.session.LocalPlayerId, new UnitPlan[0]), out _);
+
+            Assert.AreEqual(10f, a.session.PlanningSecondsRemaining, 0.001f);
+            a.session.Tick(0.2f);
+            Assert.AreEqual(10f, a.session.PlanningSecondsRemaining, 0.001f);
+
+            a.session.Tick(4f);
+            Assert.Less(a.session.PlanningSecondsRemaining, 10f);
+
+            a.session.Tick(30f);
+            Assert.AreEqual(0f, a.session.PlanningSecondsRemaining, 0.001f);
+        }
+
+        [Test]
+        public void LocalSession_ResolvesWhenTheTimerExpires()
+        {
+            var state = MatchFactory.CreateTeamMatch(new MatchConfig(), spells, 1);
+            var local = new LocalMatchSession(state, spells, new RoundResolver(spells, new LastTeamStandingCondition()), 20f, 1f);
+
+            Assert.AreEqual(20f, local.PlanningSecondsRemaining, 0.001f);
+            local.Tick(10f);
+            Assert.AreEqual(13f, local.PlanningSecondsRemaining, 0.001f);
+            Assert.AreEqual(1, state.RoundNumber);
+
+            local.Tick(15f);
+
+            Assert.AreEqual(2, state.RoundNumber);
         }
 
         [Test]
@@ -300,6 +355,115 @@ namespace BigProject.Tests
         }
 
         [Test]
+        public void Draft_IsRelayedToAlliesOnly()
+        {
+            var net = new LoopbackNetwork();
+            var bigServer = new GameServer(
+                net,
+                new ServerSettings { PlayersPerTeam = 2, PlanningSeconds = 10f, GraceSeconds = 1f },
+                spells,
+                new Random(3));
+
+            var sessions = new List<NetworkMatchSession>();
+            for (int i = 0; i < 4; i++)
+            {
+                LoopbackClient transport = net.CreateClient();
+                sessions.Add(new NetworkMatchSession(transport, spells, "P" + i));
+                transport.Connect();
+            }
+
+            NetworkMatchSession sender = sessions[0];
+            UnitState own = OwnUnit(sender);
+            int step = own.Position.X < 6 ? 1 : -1;
+            var path = Pathfinder.FindPath(sender.State.Map, own.Position, new GridPosition(own.Position.X + step, own.Position.Y), 4);
+
+            sender.SendDraft(new[] { new UnitPlan(own.Id, new UnitOrder[] { new MoveOrder(path) }) });
+
+            int allies = 0;
+            for (int i = 1; i < sessions.Count; i++)
+            {
+                bool sameTeam = OwnUnit(sessions[i]).TeamId == own.TeamId;
+                bool received = sessions[i].TryGetAllyDraft(own.Id, out IReadOnlyList<UnitOrder> orders);
+                Assert.AreEqual(sameTeam, received, "Le brouillon ne doit parvenir qu'à l'équipe du joueur.");
+                if (sameTeam)
+                {
+                    allies++;
+                    Assert.AreEqual(1, orders.Count);
+                }
+            }
+
+            Assert.AreEqual(1, allies);
+            Assert.IsFalse(sender.TryGetAllyDraft(own.Id, out _));
+        }
+
+        [Test]
+        public void Draft_ForSomeoneElsesUnit_IsNotRelayed()
+        {
+            var net = new LoopbackNetwork();
+            var bigServer = new GameServer(
+                net,
+                new ServerSettings { PlayersPerTeam = 2, PlanningSeconds = 10f, GraceSeconds = 1f },
+                spells,
+                new Random(3));
+
+            var sessions = new List<NetworkMatchSession>();
+            for (int i = 0; i < 4; i++)
+            {
+                LoopbackClient transport = net.CreateClient();
+                sessions.Add(new NetworkMatchSession(transport, spells, "P" + i));
+                transport.Connect();
+            }
+
+            NetworkMatchSession sender = sessions[0];
+            UnitState other = null;
+            foreach (UnitState unit in sender.State.Units)
+            {
+                if (unit.PlayerId != sender.LocalPlayerId && unit.TeamId == OwnUnit(sender).TeamId)
+                {
+                    other = unit;
+                }
+            }
+
+            sender.SendDraft(new[] { new UnitPlan(other.Id, new UnitOrder[] { new MoveOrder(new[] { new GridPosition(5, 5) }) }) });
+
+            foreach (NetworkMatchSession session in sessions)
+            {
+                Assert.IsFalse(session.TryGetAllyDraft(other.Id, out _));
+            }
+        }
+
+        [Test]
+        public void AllyDrafts_AreClearedWhenTheRoundIsResolved()
+        {
+            var net = new LoopbackNetwork();
+            var bigServer = new GameServer(
+                net,
+                new ServerSettings { PlayersPerTeam = 2, PlanningSeconds = 10f, GraceSeconds = 1f },
+                spells,
+                new Random(3));
+
+            var sessions = new List<NetworkMatchSession>();
+            for (int i = 0; i < 4; i++)
+            {
+                LoopbackClient transport = net.CreateClient();
+                sessions.Add(new NetworkMatchSession(transport, spells, "P" + i));
+                transport.Connect();
+            }
+
+            UnitState own = OwnUnit(sessions[0]);
+            int step = own.Position.X < 6 ? 1 : -1;
+            var path = Pathfinder.FindPath(sessions[0].State.Map, own.Position, new GridPosition(own.Position.X + step, own.Position.Y), 4);
+            sessions[0].SendDraft(new[] { new UnitPlan(own.Id, new UnitOrder[] { new MoveOrder(path) }) });
+
+            bigServer.Update(15f);
+
+            foreach (NetworkMatchSession session in sessions)
+            {
+                Assert.IsFalse(session.TryGetAllyDraft(own.Id, out _));
+            }
+        }
+
+        [Test]
         public void RoundResult_SurvivesEncodingRoundTrip()
         {
             var map = new GridMap(9, 9);
@@ -328,6 +492,56 @@ namespace BigProject.Tests
             var damaged = (UnitDamagedEvent)decoded.Result.Beats[decoded.Result.Beats.Count - 1].Events.Find(e => e is UnitDamagedEvent);
             Assert.AreEqual(2, damaged.UnitId);
             Assert.AreEqual(6, damaged.Amount);
+        }
+
+        [Test]
+        public void Snapshot_KeepsTheMapOriginAndNonSquareCustomMaps()
+        {
+            var grid = new GridMap(20, 13) { OriginX = -1, OriginY = -1 };
+            grid.SetTile(new GridPosition(3, 3), TileType.Obstacle);
+            var definition = new MapDefinition(grid);
+            MatchState original = MatchFactory.CreateTeamMatch(new MatchConfig(), spells, 3, definition);
+
+            var decoded = (MatchStartedMessage)MessageCodec.Decode(
+                MessageCodec.Encode(new MatchStartedMessage(0, 20f, MatchSnapshot.From(original))));
+            MatchState rebuilt = decoded.Snapshot.CreateState();
+
+            Assert.AreEqual(20, rebuilt.Map.Width);
+            Assert.AreEqual(13, rebuilt.Map.Height);
+            Assert.AreEqual(-1, rebuilt.Map.OriginX);
+            Assert.AreEqual(-1, rebuilt.Map.OriginY);
+            Assert.AreEqual(TileType.Obstacle, rebuilt.Map.GetTile(new GridPosition(3, 3)));
+        }
+
+        [Test]
+        public void MatchFactory_PlacesTeamsOnAnySizeOfMap_AndAvoidsBlockedSpawns()
+        {
+            var grid = new GridMap(20, 13);
+            grid.SetTile(new GridPosition(1, 4), TileType.Obstacle);
+            grid.SetTile(new GridPosition(18, 6), TileType.Pit);
+
+            MatchState state = MatchFactory.CreateTeamMatch(new MatchConfig(), spells, 3, new MapDefinition(grid));
+
+            Assert.AreEqual(6, state.Units.Count);
+            var seen = new HashSet<GridPosition>();
+            foreach (UnitState unit in state.Units)
+            {
+                Assert.IsTrue(grid.IsWalkable(unit.Position), unit.Name + " doit démarrer sur une case jouable.");
+                Assert.IsTrue(seen.Add(unit.Position), "Deux unités ne partagent pas une case.");
+            }
+        }
+
+        [Test]
+        public void MatchFactory_UsesTheSpawnsOfTheMapWhenTheyAreValid()
+        {
+            var definition = new MapDefinition(new GridMap(10, 10));
+            definition.BlueSpawns.Add(new GridPosition(0, 0));
+            definition.RedSpawns.Add(new GridPosition(9, 9));
+
+            MatchState state = MatchFactory.CreateTeamMatch(new MatchConfig(), spells, 1, definition);
+
+            Assert.AreEqual(new GridPosition(0, 0), state.GetUnit(1).Position);
+            Assert.AreEqual(new GridPosition(9, 9), state.GetUnit(2).Position);
         }
 
         [Test]

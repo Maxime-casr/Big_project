@@ -8,7 +8,7 @@ namespace BigProject.Client
     /// <summary>
     /// Scène de menu : combat local de test, recherche d'une partie en ligne, ou lancement d'un serveur
     /// (aussi automatique avec l'argument -server ou en batchmode).
-    /// Arguments du serveur : -port 7777 -playersPerTeam 3 -planningSeconds 45
+    /// Arguments du serveur : -port 7777 -playersPerTeam 3 -planningSeconds 20
     /// </summary>
     public sealed class MainMenu : MonoBehaviour
     {
@@ -40,7 +40,7 @@ namespace BigProject.Client
                 StartServer(
                     ArgumentValue("-port", 7777),
                     ArgumentValue("-playersPerTeam", 3),
-                    ArgumentValue("-planningSeconds", 45));
+                    ArgumentValue("-planningSeconds", 20));
             }
         }
 
@@ -122,7 +122,7 @@ namespace BigProject.Client
                 playersPerTeamText = LabeledField("Joueurs par équipe (1 à 4)", playersPerTeamText);
                 if (GUILayout.Button("Lancer un serveur ici"))
                 {
-                    StartServer(ParseInt(portText, 7777), ParseInt(playersPerTeamText, 3), 45);
+                    StartServer(ParseInt(portText, 7777), ParseInt(playersPerTeamText, 3), 20);
                 }
             });
         }

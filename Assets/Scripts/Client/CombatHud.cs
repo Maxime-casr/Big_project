@@ -15,9 +15,9 @@ namespace BigProject.Client
 {
     /// <summary>
     /// Interface de combat en uGUI, à poser sur le Canvas de la scène.
-    /// Les éléments déjà dessinés dans l'éditeur sont réutilisés (boutons de direction, conteneur de cartes) :
-    /// il suffit de les glisser dans les champs ci-dessous. Tout champ laissé vide est remplacé par une
-    /// version générée par code, ce qui permet de remplacer les éléments un à un par ses propres designs.
+    /// Chaque élément peut être dessiné dans l'éditeur puis glissé dans le champ correspondant ; tout champ
+    /// laissé vide est généré par code (au lancement, ou dans la scène via le menu
+    /// "Big Project > Ajouter l'interface de combat au Canvas", pour pouvoir le déplacer et le restyler).
     /// </summary>
     public sealed class CombatHud : MonoBehaviour
     {
@@ -25,15 +25,31 @@ namespace BigProject.Client
         private static readonly Color ButtonColor = new Color(0.2f, 0.25f, 0.32f, 0.95f);
         private static readonly Color ActiveColor = new Color(0.9f, 0.55f, 0.15f, 1f);
         private static readonly Color SelectedColor = new Color(0.25f, 0.5f, 0.8f, 1f);
+        private static readonly Color ConfirmColor = new Color(0.2f, 0.6f, 0.3f, 0.95f);
 
-        [Header("Déplacement : un clic = une case de plus dans le plan (vide = généré)")]
+        [Header("Déplacement : un clic = une case de plus dans le plan")]
         [SerializeField] private Button moveUp;
         [SerializeField] private Button moveDown;
         [SerializeField] private Button moveLeft;
         [SerializeField] private Button moveRight;
 
-        [Header("Conteneur des cartes de sorts (vide = généré)")]
+        [Header("Cartes de sorts")]
         [SerializeField] private RectTransform cardContainer;
+
+        [Header("Actions du tour")]
+        [SerializeField] private Button undoButton;
+        [SerializeField] private Button clearButton;
+        [SerializeField] private Button confirmButton;
+        [Tooltip("Test local uniquement : valide le tour de tous les joueurs d'un coup.")]
+        [SerializeField] private Button confirmAllButton;
+        [SerializeField] private Button recenterButton;
+
+        [Header("Chrono et progression")]
+        [SerializeField] private Text timerText;
+        [SerializeField] private Text readyText;
+
+        [Header("Minimap")]
+        [SerializeField] private MinimapView minimap;
 
         private readonly List<UnitRow> unitRows = new List<UnitRow>();
         private readonly List<CardView> cards = new List<CardView>();
@@ -47,9 +63,6 @@ namespace BigProject.Client
         private Text selectedText;
         private Text ordersText;
         private Text messageText;
-        private Button undoButton;
-        private Button clearButton;
-        private Button submitButton;
         private int cardsBuiltForUnit = -2;
 
         public event Action QuitRequested;
@@ -74,22 +87,55 @@ namespace BigProject.Client
 
         private void Awake()
         {
-            font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            BuildMissingElements();
             EnsureEventSystem();
             BuildInfoPanel();
+        }
+
+        /// <summary>
+        /// Crée les éléments d'interface dont le champ est vide. Appelé au lancement, et par le menu de
+        /// l'éditeur pour "poser" ces éléments dans la scène.
+        /// </summary>
+        public void BuildMissingElements()
+        {
+            if (font == null)
+            {
+                font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            }
 
             if (moveUp == null || moveDown == null || moveLeft == null || moveRight == null)
             {
-                BuildDefaultDirectionPad();
+                BuildDirectionPad();
             }
 
             if (cardContainer == null)
             {
-                BuildDefaultCardContainer();
+                BuildCardContainer();
+            }
+
+            if (undoButton == null || clearButton == null || confirmButton == null ||
+                confirmAllButton == null || recenterButton == null)
+            {
+                BuildActionsPanel();
+            }
+
+            if (timerText == null || readyText == null)
+            {
+                BuildTimer();
+            }
+
+            if (minimap == null)
+            {
+                BuildMinimap();
             }
         }
 
-        public void Init(PlanningController planningController, UnitViewRegistry unitViews, ResolutionPlayer resolutionPlayer)
+        public void Init(
+            PlanningController planningController,
+            UnitViewRegistry unitViews,
+            ResolutionPlayer resolutionPlayer,
+            CameraRig cameraRig,
+            BoardView board)
         {
             planning = planningController;
             units = unitViews;
@@ -99,6 +145,20 @@ namespace BigProject.Client
             moveDown.onClick.AddListener(() => planning.AddStep(new GridPosition(0, -1)));
             moveLeft.onClick.AddListener(() => planning.AddStep(new GridPosition(-1, 0)));
             moveRight.onClick.AddListener(() => planning.AddStep(new GridPosition(1, 0)));
+
+            undoButton.onClick.AddListener(() => planning.UndoLastOrder());
+            clearButton.onClick.AddListener(() => planning.ClearDraft());
+            confirmButton.onClick.AddListener(() => planning.Submit());
+            confirmAllButton.onClick.AddListener(() => planning.SubmitAll());
+            recenterButton.onClick.AddListener(cameraRig.Recenter);
+
+            minimap.Init(planning.State, board, cameraRig, planning);
+
+            if (planning.IsMultiLocal)
+            {
+                Text title = CreateText(unitsContainer, "Titre joueurs", 12, TextAnchor.MiddleLeft);
+                title.text = "Joueur contrôlé (test) — Tab pour changer";
+            }
 
             foreach (UnitState unit in planning.State.Units)
             {
@@ -125,16 +185,49 @@ namespace BigProject.Client
             MatchState state = planning.State;
             UnitState selected = planning.SelectedUnit;
             bool locked = planning.IsLocked;
+            bool planningPhase = state.Phase == MatchPhase.Planning && !resolution.IsPlaying;
 
-            headerText.text = "<b>Tour " + state.RoundNumber + "</b>" + TimerText(state) + "\n" + PhaseText(state);
+            headerText.text = "<b>Tour " + state.RoundNumber + "</b>\n" + PhaseText(state);
+            RefreshTimer(state);
             RefreshUnitRows(locked);
             RefreshSelection(selected, locked);
 
             moveUp.interactable = moveDown.interactable = moveLeft.interactable = moveRight.interactable =
                 !locked && selected != null;
             undoButton.interactable = clearButton.interactable = !locked && selected != null;
-            submitButton.interactable = !locked && state.Phase == MatchPhase.Planning;
+
+            confirmButton.interactable = !locked && planningPhase;
+            SetLabel(confirmButton, locked && planningPhase ? "Tour validé" : "Confirmer le tour");
+            confirmAllButton.gameObject.SetActive(planning.IsMultiLocal);
+            confirmAllButton.interactable = planningPhase;
+
             messageText.text = planning.Message;
+        }
+
+        private void RefreshTimer(MatchState state)
+        {
+            float seconds = planning.Session.PlanningSecondsRemaining;
+            bool planningPhase = state.Phase == MatchPhase.Planning && !resolution.IsPlaying;
+
+            if (resolution.IsPlaying)
+            {
+                timerText.text = "…";
+                timerText.color = Color.white;
+            }
+            else if (seconds > 0f && planningPhase)
+            {
+                timerText.text = Mathf.CeilToInt(seconds).ToString();
+                timerText.color = seconds <= 5f ? new Color(1f, 0.35f, 0.3f) : Color.white;
+            }
+            else
+            {
+                timerText.text = planningPhase ? "--" : string.Empty;
+                timerText.color = Color.white;
+            }
+
+            readyText.text = planningPhase
+                ? "Joueurs prêts : " + planning.Session.PlansReady + "/" + planning.Session.PlansExpected
+                : string.Empty;
         }
 
         private void RefreshUnitRows(bool locked)
@@ -145,10 +238,16 @@ namespace BigProject.Client
                 int health = units.Get(unit.Id).DisplayedHealth;
                 bool defeated = !unit.IsAlive && health <= 0;
 
-                row.Label.text = defeated
+                string label = defeated
                     ? unit.Name + "  (vaincu)"
                     : unit.Name + "   PV " + health + "/" + unit.MaxHealth + "   Mana " + unit.Mana + "/" + unit.MaxMana;
-                row.Button.interactable = !locked && unit.IsAlive && planning.IsControlledLocally(unit);
+                if (planning.IsPlayerSubmitted(unit.PlayerId))
+                {
+                    label += "   [prêt]";
+                }
+
+                row.Label.text = label;
+                row.Button.interactable = unit.IsAlive && planning.IsControlledLocally(unit);
                 row.Image.color = planning.SelectedUnitId == unit.Id ? SelectedColor : ButtonColor;
             }
         }
@@ -172,7 +271,8 @@ namespace BigProject.Client
             PlanProjection projection = planning.GetProjection(selected);
             selectedText.text = "<b>" + selected.Name + "</b>   PM : " + (selected.MovementPoints - projection.MovementUsed) +
                                 "/" + selected.MovementPoints + "   Mana : " + (selected.Mana - projection.ManaUsed) +
-                                "/" + selected.Mana;
+                                "/" + selected.Mana + "\nAction " + (planning.CurrentActionIndex + 1) +
+                                " (les alliés montrent la leur en transparence)";
 
             var builder = new StringBuilder("<b>Actions planifiées</b>");
             IReadOnlyList<UnitOrder> draft = planning.GetDraft(selected.Id);
@@ -235,17 +335,6 @@ namespace BigProject.Client
             return planning.Session.Spells.Get(cast.SpellId).DisplayName + " sur " + cast.Target;
         }
 
-        private string TimerText(MatchState state)
-        {
-            float seconds = planning.Session.PlanningSecondsRemaining;
-            if (seconds <= 0f || state.Phase != MatchPhase.Planning || resolution.IsPlaying)
-            {
-                return string.Empty;
-            }
-
-            return "   —   " + Mathf.CeilToInt(seconds) + " s";
-        }
-
         private string PhaseText(MatchState state)
         {
             if (state.Phase == MatchPhase.Finished)
@@ -256,7 +345,16 @@ namespace BigProject.Client
             return resolution.IsPlaying ? "Résolution en cours..." : "Planification : tout se joue en même temps.";
         }
 
-        // --- Construction de l'interface par défaut ---
+        private static void SetLabel(Button button, string text)
+        {
+            Text label = button.GetComponentInChildren<Text>();
+            if (label != null)
+            {
+                label.text = text;
+            }
+        }
+
+        // --- Construction des éléments ---
 
         private void BuildInfoPanel()
         {
@@ -264,67 +362,37 @@ namespace BigProject.Client
             panel.anchorMin = panel.anchorMax = panel.pivot = new Vector2(0f, 1f);
             panel.anchoredPosition = new Vector2(10f, -10f);
             panel.sizeDelta = new Vector2(380f, 0f);
-
-            var layout = panel.gameObject.AddComponent<VerticalLayoutGroup>();
-            layout.padding = new RectOffset(8, 8, 8, 8);
-            layout.spacing = 4f;
-            layout.childControlWidth = true;
-            layout.childControlHeight = true;
-            layout.childForceExpandWidth = true;
-            layout.childForceExpandHeight = false;
+            AddVerticalLayout(panel.gameObject, 4f, 8);
             panel.gameObject.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
             headerText = CreateText(panel, "Titre", 16, TextAnchor.UpperLeft);
 
             unitsContainer = new GameObject("Unités", typeof(RectTransform)).GetComponent<RectTransform>();
             unitsContainer.SetParent(panel, false);
-            var unitsLayout = unitsContainer.gameObject.AddComponent<VerticalLayoutGroup>();
-            unitsLayout.spacing = 2f;
-            unitsLayout.childControlWidth = true;
-            unitsLayout.childControlHeight = true;
-            unitsLayout.childForceExpandWidth = true;
-            unitsLayout.childForceExpandHeight = false;
+            AddVerticalLayout(unitsContainer.gameObject, 2f, 0);
 
             selectedText = CreateText(panel, "Sélection", 14, TextAnchor.UpperLeft);
             ordersText = CreateText(panel, "Ordres", 13, TextAnchor.UpperLeft);
-
-            var buttonsRow = new GameObject("Boutons", typeof(RectTransform)).GetComponent<RectTransform>();
-            buttonsRow.SetParent(panel, false);
-            var rowLayout = buttonsRow.gameObject.AddComponent<HorizontalLayoutGroup>();
-            rowLayout.spacing = 4f;
-            rowLayout.childControlWidth = true;
-            rowLayout.childControlHeight = true;
-            rowLayout.childForceExpandWidth = true;
-            rowLayout.childForceExpandHeight = false;
-
-            undoButton = CreateButton(buttonsRow, "Annuler", "Annuler la dernière", 28f, 13);
-            undoButton.onClick.AddListener(() => planning.UndoLastOrder());
-            clearButton = CreateButton(buttonsRow, "Effacer", "Tout effacer", 28f, 13);
-            clearButton.onClick.AddListener(() => planning.ClearDraft());
-
-            submitButton = CreateButton(panel, "Valider", "Valider le tour", 38f, 16);
-            submitButton.onClick.AddListener(() => planning.Submit());
-
             messageText = CreateText(panel, "Message", 13, TextAnchor.UpperLeft);
 
             Button quit = CreateButton(panel, "Quitter", "Quitter le match", 26f, 13);
             quit.onClick.AddListener(() => QuitRequested?.Invoke());
         }
 
-        private void BuildDefaultDirectionPad()
+        private void BuildDirectionPad()
         {
             RectTransform pad = CreatePanel("Déplacement (généré)", transform, PanelColor);
             pad.anchorMin = pad.anchorMax = pad.pivot = Vector2.zero;
             pad.anchoredPosition = new Vector2(10f, 10f);
             pad.sizeDelta = new Vector2(190f, 190f);
 
-            moveUp = CreatePadButton(pad, "Haut", "^", new Vector2(65f, 125f));
-            moveDown = CreatePadButton(pad, "Bas", "v", new Vector2(65f, 5f));
-            moveLeft = CreatePadButton(pad, "Gauche", "<", new Vector2(5f, 65f));
-            moveRight = CreatePadButton(pad, "Droite", ">", new Vector2(125f, 65f));
+            moveUp = moveUp != null ? moveUp : CreatePadButton(pad, "Haut", "^", new Vector2(65f, 125f));
+            moveDown = moveDown != null ? moveDown : CreatePadButton(pad, "Bas", "v", new Vector2(65f, 5f));
+            moveLeft = moveLeft != null ? moveLeft : CreatePadButton(pad, "Gauche", "<", new Vector2(5f, 65f));
+            moveRight = moveRight != null ? moveRight : CreatePadButton(pad, "Droite", ">", new Vector2(125f, 65f));
         }
 
-        private void BuildDefaultCardContainer()
+        private void BuildCardContainer()
         {
             RectTransform panel = CreatePanel("Cartes (généré)", transform, PanelColor);
             panel.anchorMin = panel.anchorMax = panel.pivot = new Vector2(0.5f, 0f);
@@ -338,6 +406,74 @@ namespace BigProject.Client
             cardContainer = panel;
         }
 
+        private void BuildActionsPanel()
+        {
+            RectTransform panel = CreatePanel("Actions du tour (généré)", transform, PanelColor);
+            panel.anchorMin = panel.anchorMax = panel.pivot = new Vector2(1f, 0.5f);
+            panel.anchoredPosition = new Vector2(-10f, 0f);
+            panel.sizeDelta = new Vector2(220f, 0f);
+            AddVerticalLayout(panel.gameObject, 4f, 8);
+            panel.gameObject.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            undoButton = undoButton != null ? undoButton : CreateButton(panel, "Annuler dernière action", "Annuler la dernière action", 30f, 13);
+            clearButton = clearButton != null ? clearButton : CreateButton(panel, "Tout annuler", "Tout annuler", 30f, 13);
+            if (confirmButton == null)
+            {
+                confirmButton = CreateButton(panel, "Confirmer le tour", "Confirmer le tour", 44f, 16);
+                confirmButton.GetComponent<Image>().color = ConfirmColor;
+            }
+
+            confirmAllButton = confirmAllButton != null ? confirmAllButton : CreateButton(panel, "Tout confirmer (test)", "Tout confirmer (test)", 30f, 13);
+            recenterButton = recenterButton != null ? recenterButton : CreateButton(panel, "Recentrer la caméra", "Recentrer la caméra (Espace)", 28f, 12);
+        }
+
+        private void BuildTimer()
+        {
+            if (timerText == null)
+            {
+                RectTransform box = CreatePanel("Chrono (généré)", transform, PanelColor);
+                box.anchorMin = box.anchorMax = box.pivot = new Vector2(0.5f, 1f);
+                box.anchoredPosition = new Vector2(0f, -10f);
+                box.sizeDelta = new Vector2(120f, 56f);
+
+                timerText = CreateText(box, "Texte", 34, TextAnchor.MiddleCenter);
+                timerText.fontStyle = FontStyle.Bold;
+                Stretch((RectTransform)timerText.transform);
+            }
+
+            if (readyText == null)
+            {
+                readyText = CreateText(transform, "Joueurs prêts (généré)", 15, TextAnchor.MiddleCenter);
+                var rect = (RectTransform)readyText.transform;
+                rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0.5f, 1f);
+                rect.anchoredPosition = new Vector2(0f, -70f);
+                rect.sizeDelta = new Vector2(320f, 26f);
+            }
+        }
+
+        private void BuildMinimap()
+        {
+            var go = new GameObject("Minimap (généré)", typeof(RectTransform), typeof(CanvasRenderer), typeof(RawImage), typeof(MinimapView));
+            go.transform.SetParent(transform, false);
+            var rect = (RectTransform)go.transform;
+            rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(1f, 1f);
+            rect.anchoredPosition = new Vector2(-10f, -10f);
+            rect.sizeDelta = new Vector2(220f, 165f);
+            go.GetComponent<RawImage>().color = new Color(0.1f, 0.1f, 0.12f, 1f);
+
+            var frameObject = new GameObject("Cadre", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Outline));
+            frameObject.transform.SetParent(go.transform, false);
+            var frameImage = frameObject.GetComponent<Image>();
+            frameImage.color = new Color(1f, 1f, 1f, 0.12f);
+            frameImage.raycastTarget = false;
+            var outline = frameObject.GetComponent<Outline>();
+            outline.effectColor = Color.white;
+            outline.effectDistance = new Vector2(1.5f, -1.5f);
+
+            minimap = go.GetComponent<MinimapView>();
+            minimap.Frame = (RectTransform)frameObject.transform;
+        }
+
         private Button CreatePadButton(RectTransform parent, string objectName, string label, Vector2 position)
         {
             Button button = CreateButton(parent, objectName, label, 60f, 22);
@@ -345,7 +481,6 @@ namespace BigProject.Client
             rect.anchorMin = rect.anchorMax = rect.pivot = Vector2.zero;
             rect.anchoredPosition = position;
             rect.sizeDelta = new Vector2(60f, 60f);
-            Destroy(button.GetComponent<LayoutElement>());
             return button;
         }
 
@@ -358,6 +493,25 @@ namespace BigProject.Client
 
             var go = new GameObject("EventSystem", typeof(EventSystem), typeof(InputSystemUIInputModule));
             go.hideFlags = HideFlags.DontSave;
+        }
+
+        private static void AddVerticalLayout(GameObject target, float spacing, int padding)
+        {
+            var layout = target.AddComponent<VerticalLayoutGroup>();
+            layout.padding = new RectOffset(padding, padding, padding, padding);
+            layout.spacing = spacing;
+            layout.childControlWidth = true;
+            layout.childControlHeight = true;
+            layout.childForceExpandWidth = true;
+            layout.childForceExpandHeight = false;
+        }
+
+        private static void Stretch(RectTransform rect)
+        {
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
         }
 
         private static RectTransform CreatePanel(string objectName, Transform parent, Color color)

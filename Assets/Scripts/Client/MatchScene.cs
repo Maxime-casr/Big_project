@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using BigProject.Core.Resolution;
 using BigProject.Core.Session;
+using BigProject.Core.Units;
 using UnityEngine;
 
 namespace BigProject.Client
@@ -51,7 +52,17 @@ namespace BigProject.Client
             session.RoundResolved += OnRoundResolved;
 
             PlanningController planning = CreateChild<PlanningController>("Planning");
-            planning.Init(session, board, highlighter, units, input, resolution, localPlayerIds);
+            planning.Init(session, highlighter, units, input, resolution, localPlayerIds);
+
+            PlanGhost ghost = CreateChild<PlanGhost>("Fantôme");
+            ghost.Init(planning, units, board, resolution);
+
+            // La caméra suit le fantôme pendant la planification, puis l'unité pendant la résolution.
+            CameraRig rig = camera.GetComponent<CameraRig>();
+            if (rig == null)
+            {
+                rig = camera.gameObject.AddComponent<CameraRig>();
+            }
 
             // Le HUD est celui du Canvas de la scène ; à défaut, un Canvas généré est créé.
             CombatHud hud = FindAnyObjectByType<CombatHud>();
@@ -61,17 +72,27 @@ namespace BigProject.Client
                 hud.transform.SetParent(transform, false);
             }
 
-            hud.Init(planning, units, resolution);
+            rig.Init(
+                board,
+                () =>
+                {
+                    UnitState unit = planning.SelectedUnit;
+                    if (unit == null)
+                    {
+                        return null;
+                    }
+
+                    return ghost.IsVisible ? ghost.Position : units.Get(unit.Id).transform.position;
+                },
+                () => hud.IsPointerOverUi);
+
+            hud.Init(planning, units, resolution, rig);
             hud.QuitRequested += () => QuitRequested?.Invoke();
             input.IsPointerBlocked = _ => hud.IsPointerOverUi;
 
-            CameraRig rig = camera.GetComponent<CameraRig>();
-            if (rig == null)
-            {
-                rig = camera.gameObject.AddComponent<CameraRig>();
-            }
-
-            rig.Init(session.State.Map, () => 0f);
+            planning.SelectionChanged += () => units.ApplyPerspective(session.State, planning.SelectedUnit);
+            planning.FocusRequested += rig.Recenter;
+            units.ApplyPerspective(session.State, planning.SelectedUnit);
         }
 
         private void OnRoundResolved(RoundResult result)

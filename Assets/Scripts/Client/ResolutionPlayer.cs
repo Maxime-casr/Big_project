@@ -23,6 +23,8 @@ namespace BigProject.Client
         private BoardView board;
         private TileHighlighter highlighter;
         private int runningAnimations;
+        private int currentStep = -1;
+        private readonly List<GridPosition> zoneCells = new List<GridPosition>();
 
         public bool IsPlaying { get; private set; }
 
@@ -48,11 +50,15 @@ namespace BigProject.Client
 
         private IEnumerator PlayRoutine(RoundResult result, MatchState finalState)
         {
+            currentStep = -1;
+            zoneCells.Clear();
+
             foreach (ResolutionBeat beat in result.Beats)
             {
                 yield return PlayBeat(beat);
             }
 
+            highlighter.Clear(HighlightLayer.Flash);
             units.SyncAll(finalState);
             IsPlaying = false;
             PlaybackFinished?.Invoke();
@@ -60,16 +66,22 @@ namespace BigProject.Client
 
         private IEnumerator PlayBeat(ResolutionBeat beat)
         {
-            var flashed = new List<GridPosition>();
+            // La zone d'un sort reste affichée pendant toute l'action : lancé au début, il touche à la fin.
+            if (beat.StepIndex != currentStep)
+            {
+                currentStep = beat.StepIndex;
+                zoneCells.Clear();
+            }
+
             foreach (GameEvent gameEvent in beat.Events)
             {
                 if (gameEvent is SpellCastEvent cast)
                 {
-                    flashed.AddRange(cast.AffectedCells);
+                    zoneCells.AddRange(cast.AffectedCells);
                 }
             }
 
-            highlighter.Set(HighlightLayer.Flash, flashed);
+            highlighter.Set(HighlightLayer.Flash, zoneCells);
 
             float elapsed = 0f;
             runningAnimations = 0;
@@ -87,8 +99,6 @@ namespace BigProject.Client
                 elapsed += Time.deltaTime;
                 yield return null;
             }
-
-            highlighter.Clear(HighlightLayer.Flash);
         }
 
         private IEnumerator Track(IEnumerator animation)

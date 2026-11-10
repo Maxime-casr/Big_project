@@ -31,6 +31,7 @@ namespace BigProject.Core.Net
             writer.WriteInt(result.Beats.Count);
             foreach (ResolutionBeat beat in result.Beats)
             {
+                writer.WriteInt(beat.StepIndex);
                 writer.WriteInt(beat.Events.Count);
                 foreach (GameEvent gameEvent in beat.Events)
                 {
@@ -56,7 +57,7 @@ namespace BigProject.Core.Net
             int beatCount = reader.ReadCount(NetLimits.MaxBeats);
             for (int b = 0; b < beatCount; b++)
             {
-                var beat = new ResolutionBeat();
+                var beat = new ResolutionBeat { StepIndex = reader.ReadCount(NetLimits.MaxOrdersPerUnit) };
                 int eventCount = reader.ReadCount(NetLimits.MaxEventsPerBeat);
                 for (int e = 0; e < eventCount; e++)
                 {
@@ -208,11 +209,14 @@ namespace BigProject.Core.Net
             {
                 case MessageType.Hello: return HelloMessage.Read(reader);
                 case MessageType.SubmitPlan: return SubmitPlanMessage.Read(reader);
+                case MessageType.Draft: return DraftMessage.Read(reader);
+                case MessageType.AllyDraft: return AllyDraftMessage.Read(reader);
                 case MessageType.QueueStatus: return QueueStatusMessage.Read(reader);
                 case MessageType.MatchStarted: return MatchStartedMessage.Read(reader);
                 case MessageType.RoundResolved: return RoundResolvedMessage.Read(reader);
                 case MessageType.PlanRejected: return PlanRejectedMessage.Read(reader);
                 case MessageType.ServerError: return ServerErrorMessage.Read(reader);
+                case MessageType.PlanStatus: return PlanStatusMessage.Read(reader);
                 default: throw new ProtocolException("Type de message inconnu.");
             }
         }
