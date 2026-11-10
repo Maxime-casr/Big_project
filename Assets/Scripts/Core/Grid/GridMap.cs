@@ -31,6 +31,13 @@ namespace BigProject.Core.Grid
         public int Width { get; }
         public int Height { get; }
 
+        /// <summary>
+        /// Coordonnées, dans la source de la carte (la Tilemap de la scène), de la case (0,0) de la grille.
+        /// Purement informatif : les règles n'en dépendent jamais, seul l'affichage s'en sert.
+        /// </summary>
+        public int OriginX { get; set; }
+        public int OriginY { get; set; }
+
         public bool IsInside(GridPosition position)
         {
             return position.X >= 0 && position.X < Width && position.Y >= 0 && position.Y < Height;

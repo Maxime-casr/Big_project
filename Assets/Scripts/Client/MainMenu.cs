@@ -1,4 +1,5 @@
 using System;
+using BigProject.Core.Match;
 using BigProject.Core.Net;
 using BigProject.Core.Spells;
 using UnityEngine;
@@ -158,12 +159,28 @@ namespace BigProject.Client
             var settings = new ServerSettings
             {
                 PlayersPerTeam = playersPerTeam,
-                PlanningSeconds = planningSeconds
+                PlanningSeconds = planningSeconds,
+                Map = LoadServerMap()
             };
 
             GameFlow.Runner.StartServer((ushort)port, settings, SpellCatalog.CreateDefault());
             state = MenuState.Server;
             Debug.Log("Serveur démarré sur le port " + port + " (" + playersPerTeam + " joueur(s) par équipe).");
+        }
+
+        /// <summary>Carte du serveur : l'asset généré depuis la Tilemap, à défaut la carte par défaut du jeu.</summary>
+        private static MapDefinition LoadServerMap()
+        {
+            MapData data = MapData.Load();
+            MapDefinition map = data != null ? data.ToDefinition() : null;
+            if (map == null)
+            {
+                Debug.LogWarning(
+                    "Aucune carte valide dans Resources/" + MapData.ResourcePath + " : le serveur utilise la carte par défaut. " +
+                    "Ouvre la scène de combat et enregistre-la (ou menu Big Project > Générer la carte du serveur).");
+            }
+
+            return map;
         }
 
         private void OnQueueChanged(int waiting, int needed)

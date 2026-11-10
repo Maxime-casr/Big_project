@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using BigProject.Core.Grid;
 using BigProject.Core.Resolution;
 using BigProject.Core.Session;
 using BigProject.Core.Units;
 using UnityEngine;
+using UnityEngine.Tilemaps;
 
 namespace BigProject.Client
 {
@@ -36,7 +38,7 @@ namespace BigProject.Client
             session = matchSession;
 
             BoardView board = CreateChild<BoardView>("Board");
-            board.Build(session.State.Map);
+            board.Build(session.State.Map, FindSceneTilemap(session.State.Map));
 
             TileHighlighter highlighter = CreateChild<TileHighlighter>("Highlights");
             highlighter.Init(board);
@@ -86,13 +88,38 @@ namespace BigProject.Client
                 },
                 () => hud.IsPointerOverUi);
 
-            hud.Init(planning, units, resolution, rig);
+            hud.Init(planning, units, resolution, rig, board);
             hud.QuitRequested += () => QuitRequested?.Invoke();
             input.IsPointerBlocked = _ => hud.IsPointerOverUi;
 
             planning.SelectionChanged += () => units.ApplyPerspective(session.State, planning.SelectedUnit);
             planning.FocusRequested += rig.Recenter;
             units.ApplyPerspective(session.State, planning.SelectedUnit);
+        }
+
+        /// <summary>
+        /// Tilemap de la scène à utiliser pour l'affichage, si elle correspond à la carte du match.
+        /// Sinon (autre carte côté serveur, par exemple), elle est masquée et le terrain est généré :
+        /// mieux vaut un affichage simple qu'une carte qui ne correspond pas aux règles.
+        /// </summary>
+        private static Tilemap FindSceneTilemap(GridMap map)
+        {
+            MapSource source = FindAnyObjectByType<MapSource>();
+            if (source == null || source.Ground == null)
+            {
+                return null;
+            }
+
+            if (source.Matches(map))
+            {
+                return source.Ground;
+            }
+
+            Debug.LogWarning(
+                "La Tilemap de la scène ne correspond pas à la carte du match (" + map.Width + "x" + map.Height +
+                "). Terrain généré à la place. Enregistre la scène pour régénérer la carte du serveur.");
+            source.Ground.gameObject.SetActive(false);
+            return null;
         }
 
         private void OnRoundResolved(RoundResult result)

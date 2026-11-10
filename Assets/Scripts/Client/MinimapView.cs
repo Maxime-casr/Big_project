@@ -29,6 +29,7 @@ namespace BigProject.Client
         private RawImage mapImage;
         private RectTransform mapRect;
         private MatchState state;
+        private BoardView board;
         private CameraRig cameraRig;
         private PlanningController planning;
         private Texture2D texture;
@@ -39,9 +40,10 @@ namespace BigProject.Client
             set => frame = value;
         }
 
-        public void Init(MatchState matchState, CameraRig rig, PlanningController planningController)
+        public void Init(MatchState matchState, BoardView boardView, CameraRig rig, PlanningController planningController)
         {
             state = matchState;
+            board = boardView;
             cameraRig = rig;
             planning = planningController;
 
@@ -121,10 +123,12 @@ namespace BigProject.Client
             Rect view = cameraRig.VisibleWorldRect;
             float width = mapRect.rect.width;
             float height = mapRect.rect.height;
-            float uMin = Mathf.Clamp01((view.xMin + state.Map.Width / 2f) / state.Map.Width);
-            float uMax = Mathf.Clamp01((view.xMax + state.Map.Width / 2f) / state.Map.Width);
-            float vMin = Mathf.Clamp01((view.yMin + state.Map.Height / 2f) / state.Map.Height);
-            float vMax = Mathf.Clamp01((view.yMax + state.Map.Height / 2f) / state.Map.Height);
+            Vector2 low = board.WorldToNormalized(new Vector3(view.xMin, view.yMin, 0f));
+            Vector2 high = board.WorldToNormalized(new Vector3(view.xMax, view.yMax, 0f));
+            float uMin = Mathf.Clamp01(low.x);
+            float uMax = Mathf.Clamp01(high.x);
+            float vMin = Mathf.Clamp01(low.y);
+            float vMax = Mathf.Clamp01(high.y);
 
             frame.anchorMin = frame.anchorMax = Vector2.zero;
             frame.pivot = Vector2.zero;
@@ -153,7 +157,7 @@ namespace BigProject.Client
             Rect rect = mapRect.rect;
             float u = Mathf.Clamp01((local.x - rect.xMin) / rect.width);
             float v = Mathf.Clamp01((local.y - rect.yMin) / rect.height);
-            cameraRig.FocusOn(new Vector3((u - 0.5f) * state.Map.Width, (v - 0.5f) * state.Map.Height, 0f));
+            cameraRig.FocusOn(board.NormalizedToWorld(new Vector2(u, v)));
         }
 
         private void BuildTexture()

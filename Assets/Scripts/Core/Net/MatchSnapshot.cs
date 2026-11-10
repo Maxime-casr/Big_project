@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using BigProject.Core.Grid;
 using BigProject.Core.Match;
@@ -29,6 +30,8 @@ namespace BigProject.Core.Net
     {
         public int Width;
         public int Height;
+        public int OriginX;
+        public int OriginY;
         public TileType[] Tiles;
         public int RoundNumber;
         public MatchPhase Phase;
@@ -43,6 +46,8 @@ namespace BigProject.Core.Net
             {
                 Width = state.Map.Width,
                 Height = state.Map.Height,
+                OriginX = state.Map.OriginX,
+                OriginY = state.Map.OriginY,
                 Tiles = new TileType[state.Map.Width * state.Map.Height],
                 RoundNumber = state.RoundNumber,
                 Phase = state.Phase,
@@ -84,7 +89,7 @@ namespace BigProject.Core.Net
         /// <summary>Construit un état complet (début de match côté client).</summary>
         public MatchState CreateState()
         {
-            var map = new GridMap(Width, Height);
+            var map = new GridMap(Width, Height) { OriginX = OriginX, OriginY = OriginY };
             for (int y = 0; y < Height; y++)
             {
                 for (int x = 0; x < Width; x++)
@@ -151,6 +156,8 @@ namespace BigProject.Core.Net
         {
             writer.WriteInt(Width);
             writer.WriteInt(Height);
+            writer.WriteInt(OriginX);
+            writer.WriteInt(OriginY);
             foreach (TileType tile in Tiles)
             {
                 writer.WriteByte((byte)tile);
@@ -195,6 +202,13 @@ namespace BigProject.Core.Net
             if (snapshot.Width == 0 || snapshot.Height == 0)
             {
                 throw new ProtocolException("Carte vide.");
+            }
+
+            snapshot.OriginX = reader.ReadInt();
+            snapshot.OriginY = reader.ReadInt();
+            if (Math.Abs(snapshot.OriginX) > NetLimits.MaxOrigin || Math.Abs(snapshot.OriginY) > NetLimits.MaxOrigin)
+            {
+                throw new ProtocolException("Origine de carte hors limites.");
             }
 
             snapshot.Tiles = new TileType[snapshot.Width * snapshot.Height];

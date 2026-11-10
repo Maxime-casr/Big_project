@@ -52,7 +52,7 @@ namespace BigProject.Client
             cam.orthographicSize = DefaultSize;
 
             Vector3? target = followTarget();
-            focus = target ?? Vector3.zero;
+            focus = target ?? board.NormalizedToWorld(new Vector2(0.5f, 0.5f));
             transform.position = ClampToBoard(new Vector3(focus.x, focus.y, -10f));
             following = true;
         }
@@ -111,12 +111,19 @@ namespace BigProject.Client
         {
             float halfHeight = cam.orthographicSize;
             float halfWidth = halfHeight * cam.aspect;
-            float boardHalfWidth = board.Map.Width / 2f + Margin;
-            float boardHalfHeight = board.Map.Height / 2f + Margin;
+            Rect bounds = board.WorldBounds;
+            bounds.xMin -= Margin;
+            bounds.yMin -= Margin;
+            bounds.xMax += Margin;
+            bounds.yMax += Margin;
 
             // Si la vue dépasse la carte, on la centre ; sinon on l'empêche de sortir.
-            position.x = halfWidth >= boardHalfWidth ? 0f : Mathf.Clamp(position.x, -boardHalfWidth + halfWidth, boardHalfWidth - halfWidth);
-            position.y = halfHeight >= boardHalfHeight ? 0f : Mathf.Clamp(position.y, -boardHalfHeight + halfHeight, boardHalfHeight - halfHeight);
+            position.x = halfWidth * 2f >= bounds.width
+                ? bounds.center.x
+                : Mathf.Clamp(position.x, bounds.xMin + halfWidth, bounds.xMax - halfWidth);
+            position.y = halfHeight * 2f >= bounds.height
+                ? bounds.center.y
+                : Mathf.Clamp(position.y, bounds.yMin + halfHeight, bounds.yMax - halfHeight);
             return position;
         }
     }

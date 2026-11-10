@@ -84,7 +84,11 @@ namespace BigProject.Client
         private IMatchSession CreateLocalTestSession(out IEnumerable<int> localPlayers)
         {
             SpellCatalog spells = SpellCatalog.CreateDefault();
-            MatchState match = MatchFactory.CreateDemo3v3(new MatchConfig(), spells);
+
+            // La carte du combat local est celle de la Tilemap de la scène, à défaut la carte par défaut.
+            MapSource source = FindAnyObjectByType<MapSource>();
+            MapDefinition map = source != null ? source.Read() : null;
+            MatchState match = MatchFactory.CreateTeamMatch(new MatchConfig(), spells, 3, map);
             var resolver = new RoundResolver(spells, new LastTeamStandingCondition());
 
             var players = new List<int>();
