@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using BigProject.Core.Grid;
 using BigProject.Core.Match;
 using BigProject.Core.Resolution;
+using BigProject.Core.Units;
 using UnityEngine;
 
 namespace BigProject.Client
@@ -53,6 +54,23 @@ namespace BigProject.Client
             currentStep = -1;
             zoneCells.Clear();
 
+            // Les unités invoquées pendant le tour existent déjà dans l'état final : leurs vues sont créées
+            // tout de suite (cachées) pour que les événements suivants puissent les retrouver.
+            foreach (ResolutionBeat beat in result.Beats)
+            {
+                foreach (GameEvent gameEvent in beat.Events)
+                {
+                    if (gameEvent is UnitSummonedEvent summoned)
+                    {
+                        UnitState unit = finalState.GetUnit(summoned.UnitId);
+                        if (unit != null)
+                        {
+                            units.EnsureView(unit).gameObject.SetActive(false);
+                        }
+                    }
+                }
+            }
+
             foreach (ResolutionBeat beat in result.Beats)
             {
                 yield return PlayBeat(beat);
@@ -78,6 +96,10 @@ namespace BigProject.Client
                 if (gameEvent is SpellCastEvent cast)
                 {
                     zoneCells.AddRange(cast.AffectedCells);
+                }
+                else if (gameEvent is SpellImpactEvent impact)
+                {
+                    zoneCells.AddRange(impact.Cells);
                 }
             }
 
@@ -114,6 +136,12 @@ namespace BigProject.Client
             {
                 case UnitMovedEvent moved:
                     return units.Get(moved.UnitId).MoveTo(board.CellToWorld(moved.To), MoveDuration);
+
+                case UnitTeleportedEvent teleported:
+                    return units.Get(teleported.UnitId).Teleport(board.CellToWorld(teleported.To), MoveDuration * 1.5f);
+
+                case UnitSummonedEvent summoned:
+                    return units.Get(summoned.UnitId).Appear(CastDuration);
 
                 case MoveBlockedEvent blocked:
                     return units.Get(blocked.UnitId).Bump(board.CellToWorld(blocked.Attempted), MoveDuration);

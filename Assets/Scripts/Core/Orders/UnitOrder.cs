@@ -21,13 +21,29 @@ namespace BigProject.Core.Orders
 
     public sealed class CastOrder : UnitOrder
     {
+        /// <summary>Aucune unité visée (sort sur une case, ou sur soi).</summary>
+        public const int NoUnit = -1;
+
+        /// <summary>Sort sur une case, ou sur soi.</summary>
         public CastOrder(string spellId, GridPosition target)
+            : this(spellId, target, NoUnit)
+        {
+        }
+
+        /// <param name="target">
+        /// La case visée. Pour un sort sur une unité, c'est seulement la position de la cible au moment de la
+        /// planification (pour l'affichage) : seul l'identifiant de l'unité compte à la résolution.
+        /// </param>
+        /// <param name="targetUnitId">L'unité visée, ou NoUnit.</param>
+        public CastOrder(string spellId, GridPosition target, int targetUnitId)
         {
             SpellId = spellId;
             Target = target;
+            TargetUnitId = targetUnitId;
         }
 
         public string SpellId { get; }
         public GridPosition Target { get; }
+        public int TargetUnitId { get; }
     }
 }

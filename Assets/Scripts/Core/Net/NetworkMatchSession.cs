@@ -92,7 +92,7 @@ namespace BigProject.Core.Net
         private void OnConnected()
         {
             hasConnected = true;
-            transport.Send(MessageCodec.Encode(new HelloMessage(NetProtocol.Version, playerName)));
+            transport.Send(MessageCodec.Encode(new HelloMessage(NetProtocol.Version, playerName, Spells.ComputeHash())));
         }
 
         private void OnDisconnected()

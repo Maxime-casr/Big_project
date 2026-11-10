@@ -70,6 +70,33 @@ namespace BigProject.Core.Match
             return null;
         }
 
+        /// <summary>Premier identifiant d'unité libre (les identifiants ne sont jamais réutilisés).</summary>
+        public int NextUnitId()
+        {
+            int max = 0;
+            foreach (UnitState unit in units)
+            {
+                max = Math.Max(max, unit.Id);
+            }
+
+            return max + 1;
+        }
+
+        /// <summary>Invocations vivantes d'un joueur.</summary>
+        public int CountLivingSummons(int playerId)
+        {
+            int count = 0;
+            foreach (UnitState unit in units)
+            {
+                if (unit.IsSummon && unit.IsAlive && unit.PlayerId == playerId)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
         /// <summary>Unité vivante présente sur la case, sinon null.</summary>
         public UnitState GetUnitAt(GridPosition position)
         {

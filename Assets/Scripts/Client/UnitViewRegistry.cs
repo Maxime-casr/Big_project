@@ -9,7 +9,10 @@ namespace BigProject.Client
     public sealed class UnitViewRegistry : MonoBehaviour
     {
         private readonly Dictionary<int, UnitView> views = new Dictionary<int, UnitView>();
+        private MatchState state;
         private BoardView board;
+        private GameObject unitPrefab;
+        private int controlledUnitId = -1;
 
         public static readonly Color OwnColor = new Color(0.25f, 0.85f, 0.35f);
         public static readonly Color AllyColor = new Color(0.2f, 0.55f, 0.95f);
@@ -43,25 +46,53 @@ namespace BigProject.Client
         }
 
         /// <summary>Recolore toutes les unités du point de vue de l'unité contrôlée.</summary>
-        public void ApplyPerspective(MatchState state, UnitState controlled)
+        public void ApplyPerspective(MatchState matchState, UnitState controlled)
         {
-            foreach (UnitState unit in state.Units)
+            controlledUnitId = controlled == null ? -1 : controlled.Id;
+            foreach (UnitState unit in matchState.Units)
             {
-                views[unit.Id].SetColor(ColorFor(unit, controlled));
+                EnsureView(unit).SetColor(ColorFor(unit, controlled));
             }
         }
 
-        public void Build(MatchState state, BoardView boardView)
+        /// <param name="prefab">
+        /// Prefab du personnage (un SpriteRenderer, éventuellement un UnitView). Null : carrés générés.
+        /// Aucun composant réseau n'est nécessaire : il n'affiche que l'état reçu.
+        /// </param>
+        public void Build(MatchState matchState, BoardView boardView, GameObject prefab = null)
         {
+            state = matchState;
             board = boardView;
+            unitPrefab = prefab;
             foreach (UnitState unit in state.Units)
             {
-                var go = new GameObject("Unit " + unit.Name + " (visuel uniquement)");
-                go.transform.SetParent(transform, false);
-                UnitView view = go.AddComponent<UnitView>();
-                view.Init(unit, board.CellToWorld(unit.Position), TeamColor(unit.TeamId));
-                views.Add(unit.Id, view);
+                EnsureView(unit);
             }
+        }
+
+        /// <summary>
+        /// La vue d'une unité, créée si elle n'existe pas encore : les invocations apparaissent en cours de match,
+        /// et leur vue doit exister avant que l'animation du tour ne les mentionne.
+        /// </summary>
+        public UnitView EnsureView(UnitState unit)
+        {
+            if (views.TryGetValue(unit.Id, out UnitView existing))
+            {
+                return existing;
+            }
+
+            GameObject go = unitPrefab != null ? Instantiate(unitPrefab, transform) : new GameObject();
+            go.name = "Unit " + unit.Name + " (visuel uniquement)";
+            go.transform.SetParent(transform, false);
+            if (!go.TryGetComponent(out UnitView view))
+            {
+                view = go.AddComponent<UnitView>();
+            }
+
+            UnitState controlled = controlledUnitId < 0 ? null : state.GetUnit(controlledUnitId);
+            view.Init(unit, board.CellToWorld(unit.Position), ColorFor(unit, controlled));
+            views.Add(unit.Id, view);
+            return view;
         }
 
         public UnitView Get(int unitId)
@@ -78,11 +109,11 @@ namespace BigProject.Client
         }
 
         /// <summary>Aligne toutes les vues sur l'état réel (fin d'animation, resynchronisation).</summary>
-        public void SyncAll(MatchState state)
+        public void SyncAll(MatchState matchState)
         {
-            foreach (UnitState unit in state.Units)
+            foreach (UnitState unit in matchState.Units)
             {
-                views[unit.Id].Snap(board.CellToWorld(unit.Position), unit.Health, unit.IsAlive);
+                EnsureView(unit).Snap(board.CellToWorld(unit.Position), unit.Health, unit.IsAlive);
             }
         }
     }

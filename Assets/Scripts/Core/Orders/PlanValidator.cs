@@ -6,7 +6,7 @@ using BigProject.Core.Units;
 
 namespace BigProject.Core.Orders
 {
-    /// <summary>Résultat de la simulation d'un plan : coûts consommés et position finale.</summary>
+    /// <summary>Résultat de la simulation d'un plan : coûts consommés, position finale et invocations prévues.</summary>
     public sealed class PlanProjection
     {
         internal PlanProjection(GridPosition start)
@@ -14,9 +14,15 @@ namespace BigProject.Core.Orders
             FinalPosition = start;
         }
 
+        /// <summary>Où sera l'unité à la fin du plan (déplacements et téléportations compris).</summary>
         public GridPosition FinalPosition { get; internal set; }
+
         public int MovementUsed { get; internal set; }
         public int ManaUsed { get; internal set; }
+
+        /// <summary>Les cases où le plan invoque une unité, dans l'ordre.</summary>
+        public List<GridPosition> SummonCells { get; } = new List<GridPosition>();
+
         public string Error { get; internal set; }
         public bool IsValid => Error == null;
     }
@@ -57,7 +63,7 @@ namespace BigProject.Core.Orders
                 }
                 else if (order is CastOrder cast)
                 {
-                    error = ApplyCast(state.Map, spells, unit, cast, position, projection);
+                    error = ApplyCast(state, spells, unit, cast, ref position, projection);
                 }
                 else
                 {
@@ -113,11 +119,11 @@ namespace BigProject.Core.Orders
         }
 
         private static string ApplyCast(
-            GridMap map,
+            MatchState state,
             SpellCatalog spells,
             UnitState unit,
             CastOrder cast,
-            GridPosition position,
+            ref GridPosition position,
             PlanProjection projection)
         {
             SpellDefinition spell = spells.Get(cast.SpellId);
@@ -132,7 +138,50 @@ namespace BigProject.Core.Orders
                 return "Pas assez de mana.";
             }
 
-            return SpellTargeting.CanTarget(map, spell, position, cast.Target, out string error) ? null : error;
+            string error;
+            switch (spell.Targeting)
+            {
+                case TargetKind.Self:
+                    return null;
+
+                case TargetKind.Unit:
+                    // À la planification, la cible est jugée sur sa position actuelle : c'est la meilleure
+                    // information disponible. La vraie vérification a lieu au lancement.
+                    UnitState target = state.GetUnit(cast.TargetUnitId);
+                    return SpellTargeting.CanTargetUnit(state.Map, spell, position, unit, target, out error) ? null : error;
+
+                default:
+                    if (!SpellTargeting.CanTarget(state.Map, spell, position, cast.Target, out error))
+                    {
+                        return error;
+                    }
+
+                    if (spell.HasEffect(SpellEffectKind.Teleport) || spell.HasEffect(SpellEffectKind.Summon))
+                    {
+                        if (!state.Map.IsWalkable(cast.Target))
+                        {
+                            return "On ne peut pas se placer sur cette case.";
+                        }
+                    }
+
+                    if (spell.HasEffect(SpellEffectKind.Summon))
+                    {
+                        int planned = state.CountLivingSummons(unit.PlayerId) + projection.SummonCells.Count;
+                        if (planned >= state.Config.MaxSummonsPerPlayer)
+                        {
+                            return "Trop d'invocations (maximum " + state.Config.MaxSummonsPerPlayer + ").";
+                        }
+
+                        projection.SummonCells.Add(cast.Target);
+                    }
+
+                    if (spell.HasEffect(SpellEffectKind.Teleport))
+                    {
+                        position = cast.Target;
+                    }
+
+                    return null;
+            }
         }
     }
 }

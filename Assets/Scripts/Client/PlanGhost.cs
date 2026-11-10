@@ -1,5 +1,7 @@
 using System.Collections.Generic;
+using BigProject.Core.Grid;
 using BigProject.Core.Match;
+using BigProject.Core.Units;
 using UnityEngine;
 
 namespace BigProject.Client
@@ -15,6 +17,8 @@ namespace BigProject.Client
         private const float Speed = 14f;
 
         private readonly Dictionary<int, SpriteRenderer> allyGhosts = new Dictionary<int, SpriteRenderer>();
+        private readonly List<SpriteRenderer> ownSummonGhosts = new List<SpriteRenderer>();
+        private readonly List<SpriteRenderer> allySummonGhosts = new List<SpriteRenderer>();
 
         private PlanningController planning;
         private UnitViewRegistry units;
@@ -34,12 +38,33 @@ namespace BigProject.Client
             resolution = resolutionPlayer;
 
             body = SpriteFactory.CreateRenderer("Fantôme", transform, new Color(UnitViewRegistry.OwnColor.r, UnitViewRegistry.OwnColor.g, UnitViewRegistry.OwnColor.b, 0.5f), 19);
-            body.transform.localScale = new Vector3(0.7f, 0.7f, 1f);
+            ApplySkin(body, 0.7f);
             body.enabled = false;
 
             // Séparé de ce fantôme : celui-ci se déplace, les fantômes alliés se placent en coordonnées du monde.
             allyRoot = new GameObject("Fantômes alliés").transform;
             allyRoot.SetParent(transform.parent, false);
+        }
+
+        /// <summary>
+        /// Les fantômes reprennent l'apparence des personnages : sprite, matériau et échelle du prefab s'il y en a
+        /// un, sinon un carré. La teinte (verte pour soi, bleue pour les alliés) et la transparence s'y ajoutent.
+        /// </summary>
+        private void ApplySkin(SpriteRenderer ghost, float squareScale)
+        {
+            UnitView sample = units.Get(planning.State.Units[0].Id);
+            if (sample != null && sample.HasCustomBody)
+            {
+                SpriteRenderer source = sample.BodyRenderer;
+                ghost.sprite = source.sprite;
+                ghost.sharedMaterial = source.sharedMaterial;
+                ghost.flipX = source.flipX;
+                ghost.flipY = source.flipY;
+                ghost.transform.localScale = source.transform.lossyScale;
+                return;
+            }
+
+            ghost.transform.localScale = new Vector3(squareScale, squareScale, 1f);
         }
 
         private void Update()
@@ -49,7 +74,12 @@ namespace BigProject.Client
                 return;
             }
 
-            UpdateAllyGhosts();
+            var previews = !resolution.IsPlaying && planning.State.Phase == MatchPhase.Planning
+                ? planning.GetAllyPreviews()
+                : new List<PlanningController.AllyPreview>();
+
+            UpdateAllyGhosts(previews);
+            UpdateSummonGhosts(previews);
 
             var unit = planning.SelectedUnit;
             if (unit == null || !unit.IsAlive || resolution.IsPlaying)
@@ -58,7 +88,7 @@ namespace BigProject.Client
                 return;
             }
 
-            Vector3 unitPosition = units.Get(unit.Id).transform.position;
+            Vector3 unitPosition = units.EnsureView(unit).transform.position;
             Vector3 target = board.CellToWorld(planning.GetProjection(unit).FinalPosition);
             bool atUnit = (target - unitPosition).sqrMagnitude < 0.0001f;
 
@@ -83,48 +113,45 @@ namespace BigProject.Client
             }
         }
 
-        private void UpdateAllyGhosts()
+        private void UpdateAllyGhosts(List<PlanningController.AllyPreview> previews)
         {
             var visible = new HashSet<int>();
 
-            if (!resolution.IsPlaying && planning.State.Phase == MatchPhase.Planning)
+            foreach (PlanningController.AllyPreview preview in previews)
             {
-                foreach (PlanningController.AllyPreview preview in planning.GetAllyPreviews())
+                int id = preview.Unit.Id;
+                Vector3 unitPosition = units.EnsureView(preview.Unit).transform.position;
+                Vector3 target = board.CellToWorld(preview.Position);
+
+                if (!allyGhosts.TryGetValue(id, out SpriteRenderer ghost))
                 {
-                    int id = preview.Unit.Id;
-                    Vector3 unitPosition = units.Get(id).transform.position;
-                    Vector3 target = board.CellToWorld(preview.Position);
+                    var color = UnitViewRegistry.AllyColor;
+                    ghost = SpriteFactory.CreateRenderer("Fantôme allié " + preview.Unit.Name, allyRoot, new Color(color.r, color.g, color.b, 0.35f), 18);
+                    ApplySkin(ghost, 0.6f);
+                    ghost.enabled = false;
+                    allyGhosts.Add(id, ghost);
+                }
 
-                    if (!allyGhosts.TryGetValue(id, out SpriteRenderer ghost))
+                bool atUnit = (target - unitPosition).sqrMagnitude < 0.0001f;
+                if (!ghost.enabled)
+                {
+                    if (atUnit)
                     {
-                        var color = UnitViewRegistry.AllyColor;
-                        ghost = SpriteFactory.CreateRenderer("Fantôme allié " + preview.Unit.Name, allyRoot, new Color(color.r, color.g, color.b, 0.35f), 18);
-                        ghost.transform.localScale = new Vector3(0.6f, 0.6f, 1f);
-                        ghost.enabled = false;
-                        allyGhosts.Add(id, ghost);
-                    }
-
-                    bool atUnit = (target - unitPosition).sqrMagnitude < 0.0001f;
-                    if (!ghost.enabled)
-                    {
-                        if (atUnit)
-                        {
-                            continue;
-                        }
-
-                        ghost.transform.position = unitPosition;
-                        ghost.enabled = true;
-                    }
-
-                    ghost.transform.position = Vector3.MoveTowards(ghost.transform.position, target, Speed * Time.deltaTime);
-                    if (atUnit && (ghost.transform.position - unitPosition).sqrMagnitude < 0.0001f)
-                    {
-                        ghost.enabled = false;
                         continue;
                     }
 
-                    visible.Add(id);
+                    ghost.transform.position = unitPosition;
+                    ghost.enabled = true;
                 }
+
+                ghost.transform.position = Vector3.MoveTowards(ghost.transform.position, target, Speed * Time.deltaTime);
+                if (atUnit && (ghost.transform.position - unitPosition).sqrMagnitude < 0.0001f)
+                {
+                    ghost.enabled = false;
+                    continue;
+                }
+
+                visible.Add(id);
             }
 
             foreach (KeyValuePair<int, SpriteRenderer> pair in allyGhosts)
@@ -133,6 +160,52 @@ namespace BigProject.Client
                 {
                     pair.Value.enabled = false;
                 }
+            }
+        }
+
+        /// <summary>
+        /// Les unités qui vont être invoquées, en transparent : les siennes et celles des alliés (à l'action
+        /// courante), pour ne pas se déplacer là où elles apparaîtront. Celles des ennemis ne sont jamais montrées.
+        /// </summary>
+        private void UpdateSummonGhosts(List<PlanningController.AllyPreview> previews)
+        {
+            var own = new List<GridPosition>();
+            var allies = new List<GridPosition>();
+
+            UnitState me = planning.SelectedUnit;
+            if (me != null && me.IsAlive && previews != null && !resolution.IsPlaying &&
+                planning.State.Phase == MatchPhase.Planning)
+            {
+                own.AddRange(planning.GetProjection(me).SummonCells);
+                foreach (PlanningController.AllyPreview preview in previews)
+                {
+                    allies.AddRange(preview.SummonCells);
+                }
+            }
+
+            FillSummonGhosts(ownSummonGhosts, own, UnitViewRegistry.OwnColor);
+            FillSummonGhosts(allySummonGhosts, allies, UnitViewRegistry.AllyColor);
+        }
+
+        private void FillSummonGhosts(List<SpriteRenderer> pool, List<GridPosition> cells, Color color)
+        {
+            for (int i = 0; i < cells.Count; i++)
+            {
+                if (i == pool.Count)
+                {
+                    SpriteRenderer ghost = SpriteFactory.CreateRenderer(
+                        "Fantôme d'invocation", allyRoot, new Color(color.r, color.g, color.b, 0.3f), 18);
+                    ApplySkin(ghost, 0.6f);
+                    pool.Add(ghost);
+                }
+
+                pool[i].enabled = true;
+                pool[i].transform.position = board.CellToWorld(cells[i]);
+            }
+
+            for (int i = cells.Count; i < pool.Count; i++)
+            {
+                pool[i].enabled = false;
             }
         }
     }

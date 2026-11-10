@@ -24,16 +24,17 @@ namespace BigProject.Client
             Transform parent,
             Camera camera,
             IMatchSession session,
-            IEnumerable<int> localPlayerIds)
+            IEnumerable<int> localPlayerIds,
+            GameObject unitPrefab = null)
         {
             var root = new GameObject("Match");
             root.transform.SetParent(parent, false);
             MatchScene scene = root.AddComponent<MatchScene>();
-            scene.Build(camera, session, localPlayerIds);
+            scene.Build(camera, session, localPlayerIds, unitPrefab);
             return scene;
         }
 
-        private void Build(Camera camera, IMatchSession matchSession, IEnumerable<int> localPlayerIds)
+        private void Build(Camera camera, IMatchSession matchSession, IEnumerable<int> localPlayerIds, GameObject unitPrefab)
         {
             session = matchSession;
 
@@ -44,7 +45,7 @@ namespace BigProject.Client
             highlighter.Init(board);
 
             UnitViewRegistry units = CreateChild<UnitViewRegistry>("Units");
-            units.Build(session.State, board);
+            units.Build(session.State, board, unitPrefab);
 
             GridInput input = CreateChild<GridInput>("Input");
             input.Init(camera, board);

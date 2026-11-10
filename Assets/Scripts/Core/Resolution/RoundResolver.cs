@@ -11,17 +11,17 @@ namespace BigProject.Core.Resolution
     /// Résout un tour complet à partir des plans de tous les joueurs, action par action.
     ///
     /// À l'action N, chaque unité exécute sa N-ième action en même temps que les autres :
-    /// - les déplacements avancent case par case, simultanément ;
-    /// - les sorts sont lancés dès le début de l'action, en même temps que les déplacements ;
-    /// - leur impact est calculé à la fin de l'action sur les positions d'arrivée : marcher hors de la zone
-    ///   dans la même action évite les dégâts, viser la case où l'ennemi va arriver le touche.
+    /// 1. les sorts sont lancés (validés sur les positions du début de l'action, mana dépensé, cibles verrouillées) ;
+    /// 2. les déplacements avancent case par case ; les téléportations et invocations arrivent au premier instant,
+    ///    avec les mêmes règles de collision (initiative tirée au sort si plusieurs visent la même case) ;
+    /// 3. les impacts sont calculés à la fin de l'action : marcher hors de la zone d'un sort sur une case évite les
+    ///    dégâts ; un sort sur une unité la touche où qu'elle soit allée.
     ///
-    /// Une unité dont une action est perturbée (déplacement bloqué, sort impossible) est interrompue :
-    /// toutes ses actions suivantes sont annulées. Un allié qui comptait traverser la case où elle s'est
-    /// arrêtée est donc bloqué à son tour, et ainsi de suite.
+    /// Une unité dont une action est perturbée (déplacement bloqué, sort impossible, cible hors de portée) est
+    /// interrompue : toutes ses actions suivantes sont annulées. Un allié qui comptait traverser la case où elle
+    /// s'est arrêtée est donc bloqué à son tour, et ainsi de suite.
     ///
-    /// Le seul hasard (priorité entre deux unités qui visent la même case) vient du Random fourni : à graine
-    /// égale, le résultat est identique.
+    /// Le seul hasard (initiative en cas de collision) vient du Random fourni : à graine égale, le résultat est identique.
     /// </summary>
     public sealed class RoundResolver
     {
@@ -99,48 +99,74 @@ namespace BigProject.Core.Resolution
                 }
             }
 
-            int firstBeat = result.Beats.Count;
-            MovementResolver.Resolve(state, moves, result.Beats, random);
-            int lastBeat = result.Beats.Count - 1;
-
-            foreach (PendingMove move in moves)
-            {
-                if (move.Stopped)
-                {
-                    interrupted.Add(move.UnitId);
-                }
-            }
-
+            // 1. Lancement des sorts, sur les positions du début de l'action.
+            var launchEvents = new ResolutionBeat();
+            CastBatch batch = new CastBatch();
             if (casts.Count > 0)
             {
-                // Les lanceurs ne bougent pas pendant leur action : le lancement peut donc être validé
-                // avant la fin des déplacements, mais l'impact doit attendre les positions d'arrivée.
-                var castBeat = new ResolutionBeat();
                 var fizzled = new List<int>();
-                List<ActiveCast> active = spellResolver.BeginCasts(state, casts, castBeat, fizzled);
+                batch = spellResolver.BeginCasts(state, casts, launchEvents, fizzled);
                 interrupted.UnionWith(fizzled);
+            }
 
-                var impactBeat = new ResolutionBeat();
-                spellResolver.ApplyImpacts(state, active, impactBeat);
+            // 2. Déplacements, téléportations et invocations.
+            var allMoves = new List<PendingMove>(moves);
+            allMoves.AddRange(batch.Placements);
 
-                if (lastBeat < firstBeat)
+            int firstBeat = result.Beats.Count;
+            MovementResolver.Resolve(state, allMoves, result.Beats, random);
+
+            var failedCasters = new HashSet<int>();
+            foreach (PendingMove move in allMoves)
+            {
+                if (!move.Stopped)
                 {
-                    var single = new ResolutionBeat();
-                    single.Events.AddRange(castBeat.Events);
-                    single.Events.AddRange(impactBeat.Events);
-                    result.Beats.Add(single);
+                    continue;
                 }
-                else
+
+                interrupted.Add(move.CasterId);
+                if (move.Kind != PlacementKind.Walk)
                 {
-                    result.Beats[firstBeat].Events.InsertRange(0, castBeat.Events);
-                    result.Beats[lastBeat].Events.AddRange(impactBeat.Events);
+                    failedCasters.Add(move.CasterId);
+                    launchEvents.Events.Add(new SpellFizzledEvent(
+                        move.CasterId, move.SpellId, move.Path[0], "La case est déjà prise."));
                 }
             }
+
+            // Un sort dont la téléportation ou l'invocation a échoué n'a pas d'impact.
+            batch.Active.RemoveAll(cast => failedCasters.Contains(cast.Caster.Id));
+
+            // 3. Impacts, à la fin de l'action.
+            var impactEvents = new ResolutionBeat();
+            spellResolver.ApplyImpacts(state, batch.Active, impactEvents);
+
+            AttachEvents(result, firstBeat, launchEvents, impactEvents);
 
             for (int i = firstBeat; i < result.Beats.Count; i++)
             {
                 result.Beats[i].StepIndex = step;
             }
+        }
+
+        /// <summary>Les événements de lancement ouvrent l'action, ceux d'impact la ferment.</summary>
+        private static void AttachEvents(RoundResult result, int firstBeat, ResolutionBeat launch, ResolutionBeat impact)
+        {
+            if (launch.Events.Count == 0 && impact.Events.Count == 0)
+            {
+                return;
+            }
+
+            if (result.Beats.Count == firstBeat)
+            {
+                var single = new ResolutionBeat();
+                single.Events.AddRange(launch.Events);
+                single.Events.AddRange(impact.Events);
+                result.Beats.Add(single);
+                return;
+            }
+
+            result.Beats[firstBeat].Events.InsertRange(0, launch.Events);
+            result.Beats[result.Beats.Count - 1].Events.AddRange(impact.Events);
         }
 
         private SortedDictionary<int, IReadOnlyList<UnitOrder>> CollectValidOrders(

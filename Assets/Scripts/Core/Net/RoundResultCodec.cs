@@ -14,6 +14,9 @@ namespace BigProject.Core.Net
         private const byte UnitDamaged = 5;
         private const byte UnitHealed = 6;
         private const byte UnitDied = 7;
+        private const byte SpellImpact = 8;
+        private const byte UnitTeleported = 9;
+        private const byte UnitSummoned = 10;
 
         public static void Write(NetWriter writer, RoundResult result)
         {
@@ -93,12 +96,29 @@ namespace BigProject.Core.Net
                     writer.WriteInt(cast.CasterId);
                     writer.WriteString(cast.SpellId);
                     writer.WritePosition(cast.Target);
-                    writer.WriteInt(cast.AffectedCells.Count);
-                    foreach (var cell in cast.AffectedCells)
-                    {
-                        writer.WritePosition(cell);
-                    }
+                    writer.WriteInt(cast.TargetUnitId);
+                    WriteCells(writer, cast.AffectedCells);
+                    break;
 
+                case SpellImpactEvent impact:
+                    writer.WriteByte(SpellImpact);
+                    writer.WriteInt(impact.CasterId);
+                    writer.WriteString(impact.SpellId);
+                    WriteCells(writer, impact.Cells);
+                    break;
+
+                case UnitTeleportedEvent teleported:
+                    writer.WriteByte(UnitTeleported);
+                    writer.WriteInt(teleported.UnitId);
+                    writer.WritePosition(teleported.From);
+                    writer.WritePosition(teleported.To);
+                    break;
+
+                case UnitSummonedEvent summoned:
+                    writer.WriteByte(UnitSummoned);
+                    writer.WriteInt(summoned.UnitId);
+                    writer.WriteInt(summoned.CasterId);
+                    writer.WritePosition(summoned.Position);
                     break;
 
                 case SpellFizzledEvent fizzled:
@@ -148,15 +168,18 @@ namespace BigProject.Core.Net
                     int caster = reader.ReadInt();
                     string spellId = reader.ReadString();
                     var target = reader.ReadPosition();
-                    int count = reader.ReadCount(NetLimits.MaxCells);
-                    var cells = new List<Grid.GridPosition>(count);
-                    for (int i = 0; i < count; i++)
-                    {
-                        cells.Add(reader.ReadPosition());
-                    }
-
-                    return new SpellCastEvent(caster, spellId, target, cells);
+                    int targetUnit = reader.ReadInt();
+                    return new SpellCastEvent(caster, spellId, target, ReadCells(reader), targetUnit);
                 }
+
+                case SpellImpact:
+                    return new SpellImpactEvent(reader.ReadInt(), reader.ReadString(), ReadCells(reader));
+
+                case UnitTeleported:
+                    return new UnitTeleportedEvent(reader.ReadInt(), reader.ReadPosition(), reader.ReadPosition());
+
+                case UnitSummoned:
+                    return new UnitSummonedEvent(reader.ReadInt(), reader.ReadInt(), reader.ReadPosition());
 
                 case SpellFizzled:
                     return new SpellFizzledEvent(reader.ReadInt(), reader.ReadString(), reader.ReadPosition(), reader.ReadReason());
@@ -173,6 +196,27 @@ namespace BigProject.Core.Net
                 default:
                     throw new ProtocolException("Événement inconnu.");
                     }
+        }
+
+        private static void WriteCells(NetWriter writer, IReadOnlyList<Grid.GridPosition> cells)
+        {
+            writer.WriteInt(cells.Count);
+            foreach (Grid.GridPosition cell in cells)
+            {
+                writer.WritePosition(cell);
+            }
+        }
+
+        private static List<Grid.GridPosition> ReadCells(NetReader reader)
+        {
+            int count = reader.ReadCount(NetLimits.MaxCells);
+            var cells = new List<Grid.GridPosition>(count);
+            for (int i = 0; i < count; i++)
+            {
+                cells.Add(reader.ReadPosition());
+            }
+
+            return cells;
         }
     }
 

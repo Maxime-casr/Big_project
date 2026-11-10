@@ -39,18 +39,74 @@ namespace BigProject.Core.Resolution
 
     public sealed class SpellCastEvent : GameEvent
     {
-        public SpellCastEvent(int casterId, string spellId, GridPosition target, IReadOnlyList<GridPosition> affectedCells)
+        public SpellCastEvent(
+            int casterId,
+            string spellId,
+            GridPosition target,
+            IReadOnlyList<GridPosition> affectedCells,
+            int targetUnitId = -1)
         {
             CasterId = casterId;
             SpellId = spellId;
             Target = target;
             AffectedCells = affectedCells;
+            TargetUnitId = targetUnitId;
         }
 
         public int CasterId { get; }
         public string SpellId { get; }
         public GridPosition Target { get; }
+
+        /// <summary>Zone visée dès le lancement (sorts sur une case). Vide pour un sort sur une unité.</summary>
         public IReadOnlyList<GridPosition> AffectedCells { get; }
+
+        /// <summary>Unité verrouillée par le sort, ou -1.</summary>
+        public int TargetUnitId { get; }
+    }
+
+    /// <summary>La zone réellement touchée à la fin de l'action (pour un sort sur une unité, autour de sa position finale).</summary>
+    public sealed class SpellImpactEvent : GameEvent
+    {
+        public SpellImpactEvent(int casterId, string spellId, IReadOnlyList<GridPosition> cells)
+        {
+            CasterId = casterId;
+            SpellId = spellId;
+            Cells = cells;
+        }
+
+        public int CasterId { get; }
+        public string SpellId { get; }
+        public IReadOnlyList<GridPosition> Cells { get; }
+    }
+
+    /// <summary>Le lanceur disparaît d'une case et réapparaît sur une autre.</summary>
+    public sealed class UnitTeleportedEvent : GameEvent
+    {
+        public UnitTeleportedEvent(int unitId, GridPosition from, GridPosition to)
+        {
+            UnitId = unitId;
+            From = from;
+            To = to;
+        }
+
+        public int UnitId { get; }
+        public GridPosition From { get; }
+        public GridPosition To { get; }
+    }
+
+    /// <summary>Une nouvelle unité apparaît. Ses caractéristiques sont dans l'état envoyé avec le résultat du tour.</summary>
+    public sealed class UnitSummonedEvent : GameEvent
+    {
+        public UnitSummonedEvent(int unitId, int casterId, GridPosition position)
+        {
+            UnitId = unitId;
+            CasterId = casterId;
+            Position = position;
+        }
+
+        public int UnitId { get; }
+        public int CasterId { get; }
+        public GridPosition Position { get; }
     }
 
     /// <summary>Le sort n'a pas pu être lancé (lanceur bloqué hors de portée, par exemple).</summary>

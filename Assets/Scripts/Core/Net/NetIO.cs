@@ -8,7 +8,7 @@ namespace BigProject.Core.Net
     public static class NetProtocol
     {
         /// <summary>À incrémenter à chaque changement de protocole ou de règles partagées (catalogue de sorts compris).</summary>
-        public const int Version = 3;
+        public const int Version = 4;
     }
 
     /// <summary>Bornes appliquées à tout ce qui est lu sur le réseau : un client malveillant ne peut pas forcer d'allocation géante.</summary>
@@ -21,7 +21,7 @@ namespace BigProject.Core.Net
         public const int MaxMapSide = 64;
         public const int MaxOrigin = 100000;
         public const int MaxUnits = 64;
-        public const int MaxSpellsPerUnit = 16;
+        public const int MaxSpellsPerUnit = 32;
         public const int MaxUnitPlans = 16;
         public const int MaxOrdersPerUnit = 32;
         public const int MaxPathLength = 64;

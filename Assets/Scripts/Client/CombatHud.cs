@@ -24,7 +24,6 @@ namespace BigProject.Client
         private static readonly Color PanelColor = new Color(0f, 0f, 0f, 0.6f);
         private static readonly Color ButtonColor = new Color(0.2f, 0.25f, 0.32f, 0.95f);
         private static readonly Color ActiveColor = new Color(0.9f, 0.55f, 0.15f, 1f);
-        private static readonly Color SelectedColor = new Color(0.25f, 0.5f, 0.8f, 1f);
         private static readonly Color ConfirmColor = new Color(0.2f, 0.6f, 0.3f, 0.95f);
 
         [Header("Déplacement : un clic = une case de plus dans le plan")]
@@ -51,14 +50,16 @@ namespace BigProject.Client
         [Header("Minimap")]
         [SerializeField] private MinimapView minimap;
 
-        private readonly List<UnitRow> unitRows = new List<UnitRow>();
         private readonly List<CardView> cards = new List<CardView>();
 
         private PlanningController planning;
         private UnitViewRegistry units;
         private ResolutionPlayer resolution;
         private Font font;
-        private RectTransform unitsContainer;
+        private GameObject switcherRow;
+        private Text switcherLabel;
+        private Button switcherPrevious;
+        private Button switcherNext;
         private Text headerText;
         private Text selectedText;
         private Text ordersText;
@@ -154,25 +155,10 @@ namespace BigProject.Client
 
             minimap.Init(planning.State, board, cameraRig, planning);
 
-            if (planning.IsMultiLocal)
-            {
-                Text title = CreateText(unitsContainer, "Titre joueurs", 12, TextAnchor.MiddleLeft);
-                title.text = "Joueur contrôlé (test) — Tab pour changer";
-            }
-
-            foreach (UnitState unit in planning.State.Units)
-            {
-                UnitState captured = unit;
-                Button button = CreateButton(unitsContainer, "Unité " + unit.Name, string.Empty, 26f, 13);
-                button.onClick.AddListener(() => planning.SelectUnit(captured.Id));
-                unitRows.Add(new UnitRow
-                {
-                    Unit = unit,
-                    Button = button,
-                    Image = button.GetComponent<Image>(),
-                    Label = button.GetComponentInChildren<Text>()
-                });
-            }
+            // Test local : un petit sélecteur "< nom >" pour passer d'un joueur à l'autre.
+            switcherRow.SetActive(planning.IsMultiLocal);
+            switcherPrevious.onClick.AddListener(planning.SelectPreviousLocalUnit);
+            switcherNext.onClick.AddListener(planning.SelectNextLocalUnit);
         }
 
         private void Update()
@@ -189,7 +175,7 @@ namespace BigProject.Client
 
             headerText.text = "<b>Tour " + state.RoundNumber + "</b>\n" + PhaseText(state);
             RefreshTimer(state);
-            RefreshUnitRows(locked);
+            RefreshSwitcher();
             RefreshSelection(selected, locked);
 
             moveUp.interactable = moveDown.interactable = moveLeft.interactable = moveRight.interactable =
@@ -230,26 +216,28 @@ namespace BigProject.Client
                 : string.Empty;
         }
 
-        private void RefreshUnitRows(bool locked)
+        /// <summary>Nom du joueur contrôlé, ses PV (animés) et s'il a déjà confirmé son tour.</summary>
+        private void RefreshSwitcher()
         {
-            foreach (UnitRow row in unitRows)
+            if (!switcherRow.activeSelf)
             {
-                UnitState unit = row.Unit;
-                int health = units.Get(unit.Id).DisplayedHealth;
-                bool defeated = !unit.IsAlive && health <= 0;
-
-                string label = defeated
-                    ? unit.Name + "  (vaincu)"
-                    : unit.Name + "   PV " + health + "/" + unit.MaxHealth + "   Mana " + unit.Mana + "/" + unit.MaxMana;
-                if (planning.IsPlayerSubmitted(unit.PlayerId))
-                {
-                    label += "   [prêt]";
-                }
-
-                row.Label.text = label;
-                row.Button.interactable = unit.IsAlive && planning.IsControlledLocally(unit);
-                row.Image.color = planning.SelectedUnitId == unit.Id ? SelectedColor : ButtonColor;
+                return;
             }
+
+            UnitState unit = planning.SelectedUnit;
+            if (unit == null)
+            {
+                switcherLabel.text = "—";
+                return;
+            }
+
+            string label = unit.Name + "   PV " + units.Get(unit.Id).DisplayedHealth + "/" + unit.MaxHealth;
+            if (planning.IsPlayerSubmitted(unit.PlayerId))
+            {
+                label += "   [prêt]";
+            }
+
+            switcherLabel.text = label;
         }
 
         private void RefreshSelection(UnitState selected, bool locked)
@@ -315,12 +303,46 @@ namespace BigProject.Client
             foreach (string spellId in selected.SpellIds)
             {
                 SpellDefinition spell = planning.Session.Spells.Get(spellId);
-                string label = "<b>" + spell.DisplayName + "</b>\n" + spell.ManaCost + " mana\nportée " +
-                               spell.MinRange + "-" + spell.MaxRange;
-                Button button = CreateButton(cardContainer, "Carte " + spell.Id, label, 120f, 12);
+                if (spell == null)
+                {
+                    continue;
+                }
+
+                string label = "<b>" + spell.DisplayName + "</b>\n" + spell.ManaCost + " mana\n" +
+                               spell.DescribeTargeting() + "\n" + spell.DescribeEffects();
+                Button button = CreateButton(cardContainer, "Carte " + spell.Id, label, 120f, 11);
+
+                Sprite icon = GameContent.GetIcon(spellId);
+                if (icon != null)
+                {
+                    AddCardIcon(button, icon);
+                }
+
                 string captured = spellId;
                 button.onClick.AddListener(() => planning.SetSpellTool(captured));
                 cards.Add(new CardView { SpellId = spellId, Button = button, Image = button.GetComponent<Image>() });
+            }
+        }
+
+        /// <summary>L'icône du sort en haut de la carte, le texte se décale dessous.</summary>
+        private static void AddCardIcon(Button button, Sprite icon)
+        {
+            var go = new GameObject("Icône", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(button.transform, false);
+            var rect = (RectTransform)go.transform;
+            rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0.5f, 1f);
+            rect.anchoredPosition = new Vector2(0f, -4f);
+            rect.sizeDelta = new Vector2(36f, 36f);
+
+            var image = go.GetComponent<Image>();
+            image.sprite = icon;
+            image.preserveAspect = true;
+            image.raycastTarget = false;
+
+            Text label = button.GetComponentInChildren<Text>();
+            if (label != null)
+            {
+                ((RectTransform)label.transform).offsetMax = new Vector2(-4f, -42f);
             }
         }
 
@@ -332,7 +354,17 @@ namespace BigProject.Client
             }
 
             var cast = (CastOrder)order;
-            return planning.Session.Spells.Get(cast.SpellId).DisplayName + " sur " + cast.Target;
+            SpellDefinition spell = planning.Session.Spells.Get(cast.SpellId);
+            switch (spell.Targeting)
+            {
+                case TargetKind.Self:
+                    return spell.DisplayName + " (sur soi)";
+                case TargetKind.Unit:
+                    UnitState target = planning.State.GetUnit(cast.TargetUnitId);
+                    return spell.DisplayName + " sur " + (target != null ? target.Name : "?");
+                default:
+                    return spell.DisplayName + " sur " + cast.Target;
+            }
         }
 
         private string PhaseText(MatchState state)
@@ -367,9 +399,7 @@ namespace BigProject.Client
 
             headerText = CreateText(panel, "Titre", 16, TextAnchor.UpperLeft);
 
-            unitsContainer = new GameObject("Unités", typeof(RectTransform)).GetComponent<RectTransform>();
-            unitsContainer.SetParent(panel, false);
-            AddVerticalLayout(unitsContainer.gameObject, 2f, 0);
+            BuildUnitSwitcher(panel);
 
             selectedText = CreateText(panel, "Sélection", 14, TextAnchor.UpperLeft);
             ordersText = CreateText(panel, "Ordres", 13, TextAnchor.UpperLeft);
@@ -377,6 +407,31 @@ namespace BigProject.Client
 
             Button quit = CreateButton(panel, "Quitter", "Quitter le match", 26f, 13);
             quit.onClick.AddListener(() => QuitRequested?.Invoke());
+        }
+
+        /// <summary>Une ligne compacte : [<]  nom du joueur contrôlé  [>]. Masquée hors test local.</summary>
+        private void BuildUnitSwitcher(RectTransform parent)
+        {
+            var row = new GameObject("Changer de joueur (test)", typeof(RectTransform), typeof(LayoutElement));
+            row.transform.SetParent(parent, false);
+            row.GetComponent<LayoutElement>().preferredHeight = 26f;
+            switcherRow = row;
+
+            var layout = row.AddComponent<HorizontalLayoutGroup>();
+            layout.spacing = 4f;
+            layout.childControlWidth = true;
+            layout.childControlHeight = true;
+            layout.childForceExpandWidth = false;
+            layout.childForceExpandHeight = true;
+
+            switcherPrevious = CreateButton(row.transform, "Joueur précédent", "<", 26f, 16);
+            switcherPrevious.GetComponent<LayoutElement>().preferredWidth = 32f;
+
+            switcherLabel = CreateText(row.transform, "Joueur contrôlé", 13, TextAnchor.MiddleCenter);
+            switcherLabel.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
+
+            switcherNext = CreateButton(row.transform, "Joueur suivant", ">", 26f, 16);
+            switcherNext.GetComponent<LayoutElement>().preferredWidth = 32f;
         }
 
         private void BuildDirectionPad()
@@ -559,14 +614,6 @@ namespace BigProject.Client
             text.text = label;
 
             return go.GetComponent<Button>();
-        }
-
-        private sealed class UnitRow
-        {
-            public UnitState Unit;
-            public Button Button;
-            public Image Image;
-            public Text Label;
         }
 
         private sealed class CardView

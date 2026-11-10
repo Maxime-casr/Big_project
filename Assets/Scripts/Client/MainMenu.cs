@@ -137,7 +137,7 @@ namespace BigProject.Client
             }
 
             queueMessage = string.Empty;
-            onlineSession = GameFlow.Runner.StartClient(address, port, playerName, SpellCatalog.CreateDefault());
+            onlineSession = GameFlow.Runner.StartClient(address, port, playerName, GameContent.LoadSpells());
             onlineSession.QueueChanged += OnQueueChanged;
             onlineSession.MatchStarted += OnMatchStarted;
             onlineSession.Failed += OnNetworkFailed;
@@ -163,7 +163,7 @@ namespace BigProject.Client
                 Map = LoadServerMap()
             };
 
-            GameFlow.Runner.StartServer((ushort)port, settings, SpellCatalog.CreateDefault());
+            GameFlow.Runner.StartServer((ushort)port, settings, GameContent.LoadSpells());
             state = MenuState.Server;
             Debug.Log("Serveur démarré sur le port " + port + " (" + playersPerTeam + " joueur(s) par équipe).");
         }

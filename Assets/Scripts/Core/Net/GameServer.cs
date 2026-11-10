@@ -125,6 +125,12 @@ namespace BigProject.Core.Net
                 return;
             }
 
+            if (hello.ContentHash != spells.ComputeHash())
+            {
+                Kick(slot.ConnectionId, "Les sorts du client et du serveur diffèrent. Mets les deux à jour.");
+                return;
+            }
+
             slot.Name = string.IsNullOrWhiteSpace(hello.PlayerName) ? "Joueur" : hello.PlayerName;
             queue.Add(slot);
             BroadcastQueueStatus();

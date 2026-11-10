@@ -19,6 +19,9 @@ namespace BigProject.Client
         [Tooltip("Durée de planification d'un tour pour le combat local de test.")]
         [SerializeField] private float planningSeconds = 20f;
 
+        [Tooltip("Prefab des personnages (un SpriteRenderer). Vide = carrés générés. Aucun composant réseau nécessaire.")]
+        [SerializeField] private GameObject unitPrefab;
+
         private NetworkMatchSession onlineSession;
         private LocalMatchSession localSession;
         private bool leaveRequested;
@@ -50,7 +53,7 @@ namespace BigProject.Client
                 session = CreateLocalTestSession(out localPlayers);
             }
 
-            MatchScene scene = MatchScene.Create(transform, camera, session, localPlayers);
+            MatchScene scene = MatchScene.Create(transform, camera, session, localPlayers, unitPrefab);
             scene.QuitRequested += () => GameFlow.ReturnToMenu();
         }
 
@@ -83,7 +86,7 @@ namespace BigProject.Client
 
         private IMatchSession CreateLocalTestSession(out IEnumerable<int> localPlayers)
         {
-            SpellCatalog spells = SpellCatalog.CreateDefault();
+            SpellCatalog spells = GameContent.LoadSpells();
 
             // La carte du combat local est celle de la Tilemap de la scène, à défaut la carte par défaut.
             MapSource source = FindAnyObjectByType<MapSource>();

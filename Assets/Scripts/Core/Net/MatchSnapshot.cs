@@ -19,6 +19,8 @@ namespace BigProject.Core.Net
         public int Mana;
         public int MaxMana;
         public int MovementPoints;
+        public bool IsSummon;
+        public int OwnerUnitId = UnitState.NoOwner;
         public List<string> SpellIds = new List<string>();
     }
 
@@ -38,6 +40,7 @@ namespace BigProject.Core.Net
         public int WinnerTeamId;
         public int ManaRegenPerRound;
         public int MaxOrdersPerUnit;
+        public int MaxSummonsPerPlayer;
         public List<UnitSnapshot> Units = new List<UnitSnapshot>();
 
         public static MatchSnapshot From(MatchState state)
@@ -53,7 +56,8 @@ namespace BigProject.Core.Net
                 Phase = state.Phase,
                 WinnerTeamId = state.WinnerTeamId,
                 ManaRegenPerRound = state.Config.ManaRegenPerRound,
-                MaxOrdersPerUnit = state.Config.MaxOrdersPerUnit
+                MaxOrdersPerUnit = state.Config.MaxOrdersPerUnit,
+                MaxSummonsPerPlayer = state.Config.MaxSummonsPerPlayer
             };
 
             for (int y = 0; y < state.Map.Height; y++)
@@ -79,6 +83,8 @@ namespace BigProject.Core.Net
                     Mana = unit.Mana,
                     MaxMana = unit.MaxMana,
                     MovementPoints = unit.MovementPoints,
+                    IsSummon = unit.IsSummon,
+                    OwnerUnitId = unit.OwnerUnitId,
                     SpellIds = new List<string>(unit.SpellIds)
                 });
             }
@@ -101,19 +107,15 @@ namespace BigProject.Core.Net
             var state = new MatchState(map, new MatchConfig
             {
                 ManaRegenPerRound = ManaRegenPerRound,
-                MaxOrdersPerUnit = MaxOrdersPerUnit
+                MaxOrdersPerUnit = MaxOrdersPerUnit,
+                MaxSummonsPerPlayer = MaxSummonsPerPlayer
             });
 
             try
             {
                 foreach (UnitSnapshot data in Units)
                 {
-                    var position = new GridPosition(data.X, data.Y);
-                    var unit = new UnitState(
-                        data.Id, data.PlayerId, data.TeamId, data.Name, position,
-                        data.MaxHealth, data.MaxMana, data.MovementPoints, data.SpellIds);
-                    unit.ApplyStatus(position, data.Health, data.Mana);
-                    state.AddUnit(unit);
+                    state.AddUnit(CreateUnit(data));
                 }
             }
             catch (System.InvalidOperationException exception)
@@ -127,15 +129,30 @@ namespace BigProject.Core.Net
             return state;
         }
 
-        /// <summary>Aligne un état existant sur l'instantané du serveur (fin de tour).</summary>
+        private static UnitState CreateUnit(UnitSnapshot data)
+        {
+            var position = new GridPosition(data.X, data.Y);
+            var unit = new UnitState(
+                data.Id, data.PlayerId, data.TeamId, data.Name, position,
+                data.MaxHealth, data.MaxMana, data.MovementPoints, data.SpellIds,
+                data.IsSummon, data.OwnerUnitId);
+            unit.ApplyStatus(position, data.Health, data.Mana);
+            return unit;
+        }
+
+        /// <summary>
+        /// Aligne un état existant sur l'instantané du serveur (fin de tour). Les unités apparues pendant le
+        /// tour (invocations) sont créées.
+        /// </summary>
         public void ApplyTo(MatchState state)
         {
+            // D'abord les unités connues : elles libèrent les cases que les nouvelles vont occuper.
             foreach (UnitSnapshot data in Units)
             {
                 UnitState unit = state.GetUnit(data.Id);
                 if (unit == null)
                 {
-                    throw new ProtocolException("Unité inconnue dans l'instantané : " + data.Id);
+                    continue;
                 }
 
                 var position = new GridPosition(data.X, data.Y);
@@ -145,6 +162,23 @@ namespace BigProject.Core.Net
                 }
 
                 unit.ApplyStatus(position, data.Health, data.Mana);
+            }
+
+            foreach (UnitSnapshot data in Units)
+            {
+                if (state.GetUnit(data.Id) != null)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    state.AddUnit(CreateUnit(data));
+                }
+                catch (System.InvalidOperationException exception)
+                {
+                    throw new ProtocolException("Instantané incohérent : " + exception.Message);
+                }
             }
 
             state.RoundNumber = RoundNumber;
@@ -168,6 +202,7 @@ namespace BigProject.Core.Net
             writer.WriteInt(WinnerTeamId);
             writer.WriteInt(ManaRegenPerRound);
             writer.WriteInt(MaxOrdersPerUnit);
+            writer.WriteInt(MaxSummonsPerPlayer);
 
             writer.WriteInt(Units.Count);
             foreach (UnitSnapshot unit in Units)
@@ -183,6 +218,8 @@ namespace BigProject.Core.Net
                 writer.WriteInt(unit.Mana);
                 writer.WriteInt(unit.MaxMana);
                 writer.WriteInt(unit.MovementPoints);
+                writer.WriteBool(unit.IsSummon);
+                writer.WriteInt(unit.OwnerUnitId);
                 writer.WriteInt(unit.SpellIds.Count);
                 foreach (string spellId in unit.SpellIds)
                 {
@@ -222,6 +259,7 @@ namespace BigProject.Core.Net
             snapshot.WinnerTeamId = reader.ReadInt();
             snapshot.ManaRegenPerRound = reader.ReadInt();
             snapshot.MaxOrdersPerUnit = reader.ReadCount(NetLimits.MaxOrdersPerUnit);
+            snapshot.MaxSummonsPerPlayer = reader.ReadCount(NetLimits.MaxUnits);
 
             int unitCount = reader.ReadCount(NetLimits.MaxUnits);
             for (int i = 0; i < unitCount; i++)
@@ -238,7 +276,9 @@ namespace BigProject.Core.Net
                     MaxHealth = reader.ReadInt(),
                     Mana = reader.ReadInt(),
                     MaxMana = reader.ReadInt(),
-                    MovementPoints = reader.ReadInt()
+                    MovementPoints = reader.ReadInt(),
+                    IsSummon = reader.ReadBool(),
+                    OwnerUnitId = reader.ReadInt()
                 };
 
                 int spellCount = reader.ReadCount(NetLimits.MaxSpellsPerUnit);

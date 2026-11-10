@@ -18,7 +18,8 @@ namespace BigProject.Core.Match
             var aliveTeams = new HashSet<int>();
             foreach (UnitState unit in state.Units)
             {
-                if (unit.IsAlive)
+                // Les invocations ne comptent pas : une équipe dont les personnages sont tous vaincus a perdu.
+                if (unit.IsAlive && !unit.IsSummon)
                 {
                     aliveTeams.Add(unit.TeamId);
                 }

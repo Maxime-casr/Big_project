@@ -27,28 +27,36 @@ namespace BigProject.Core.Net
         internal abstract void Write(NetWriter writer);
     }
 
-    /// <summary>Premier message d'un client : version du protocole et pseudo. Place le joueur dans la file.</summary>
+    /// <summary>
+    /// Premier message d'un client : version du protocole, empreinte des sorts et pseudo. Place le joueur dans
+    /// la file. Le serveur refuse un client dont les règles (version ou sorts) diffèrent des siennes.
+    /// </summary>
     public sealed class HelloMessage : NetMessage
     {
-        public HelloMessage(int protocolVersion, string playerName)
+        public HelloMessage(int protocolVersion, string playerName, int contentHash = 0)
         {
             ProtocolVersion = protocolVersion;
             PlayerName = playerName;
+            ContentHash = contentHash;
         }
 
         public int ProtocolVersion { get; }
         public string PlayerName { get; }
+        public int ContentHash { get; }
         public override MessageType Type => MessageType.Hello;
 
         internal override void Write(NetWriter writer)
         {
             writer.WriteInt(ProtocolVersion);
+            writer.WriteInt(ContentHash);
             writer.WriteString(PlayerName);
         }
 
         internal static HelloMessage Read(NetReader reader)
         {
-            return new HelloMessage(reader.ReadInt(), reader.ReadString());
+            int version = reader.ReadInt();
+            int hash = reader.ReadInt();
+            return new HelloMessage(version, reader.ReadString(), hash);
         }
     }
 
@@ -89,6 +97,7 @@ namespace BigProject.Core.Net
                         writer.WriteByte(2);
                         writer.WriteString(cast.SpellId);
                         writer.WritePosition(cast.Target);
+                        writer.WriteInt(cast.TargetUnitId);
                     }
                     else
                     {
@@ -124,7 +133,8 @@ namespace BigProject.Core.Net
                     else if (kind == 2)
                     {
                         string spellId = reader.ReadString();
-                        orders.Add(new CastOrder(spellId, reader.ReadPosition()));
+                        var target = reader.ReadPosition();
+                        orders.Add(new CastOrder(spellId, target, reader.ReadInt()));
                     }
                     else
                     {

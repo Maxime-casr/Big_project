@@ -49,6 +49,9 @@ namespace BigProject.Client
             public UnitState Unit;
             public GridPosition Position;
             public UnitOrder CurrentOrder;
+
+            /// <summary>Les cases où il aura invoqué une unité d'ici cette action : à montrer en transparent.</summary>
+            public IReadOnlyList<GridPosition> SummonCells;
         }
 
         public PlanningTool Tool { get; private set; }
@@ -183,7 +186,8 @@ namespace BigProject.Client
                 {
                     Unit = ally,
                     Position = projection.IsValid ? projection.FinalPosition : ally.Position,
-                    CurrentOrder = orders.Count > index ? orders[index] : null
+                    CurrentOrder = orders.Count > index ? orders[index] : null,
+                    SummonCells = projection.IsValid ? projection.SummonCells : new List<GridPosition>()
                 });
             }
 
@@ -210,6 +214,17 @@ namespace BigProject.Client
         /// <summary>Passe au joueur local suivant encore en vie (test local).</summary>
         public void SelectNextLocalUnit()
         {
+            SelectAdjacentLocalUnit(1);
+        }
+
+        /// <summary>Revient au joueur local précédent encore en vie (test local).</summary>
+        public void SelectPreviousLocalUnit()
+        {
+            SelectAdjacentLocalUnit(-1);
+        }
+
+        private void SelectAdjacentLocalUnit(int direction)
+        {
             IReadOnlyList<UnitState> all = session.State.Units;
             int start = -1;
             for (int i = 0; i < all.Count; i++)
@@ -222,7 +237,8 @@ namespace BigProject.Client
 
             for (int offset = 1; offset <= all.Count; offset++)
             {
-                UnitState candidate = all[(start + offset + all.Count) % all.Count];
+                int index = ((start + direction * offset) % all.Count + all.Count) % all.Count;
+                UnitState candidate = all[index];
                 if (candidate.IsAlive && IsControlledLocally(candidate))
                 {
                     SelectUnit(candidate.Id);
@@ -237,10 +253,29 @@ namespace BigProject.Client
             RefreshHighlights();
         }
 
+        /// <summary>
+        /// Choisit un sort. Un sort sur soi n'a pas de cible : il est ajouté tout de suite au plan. Sinon l'outil
+        /// de sort est activé et le joueur clique la case ou l'unité visée.
+        /// </summary>
         public void SetSpellTool(string spellId)
         {
+            SpellDefinition spell = session.Spells.Get(spellId);
+            UnitState unit = SelectedUnit;
+            if (spell != null && spell.Targeting == TargetKind.Self && unit != null && !IsLocked)
+            {
+                GridPosition position = GetProjection(unit).FinalPosition;
+                TryAppend(unit, new CastOrder(spellId, position, unit.Id), spell.DisplayName + " ajouté.");
+                return;
+            }
+
             ActiveSpellId = spellId;
             Tool = PlanningTool.Spell;
+            string description = GameContent.GetDescription(spellId);
+            if (spell != null)
+            {
+                Message = spell.DisplayName + (string.IsNullOrEmpty(description) ? string.Empty : " — " + description);
+            }
+
             RefreshHighlights();
         }
 
@@ -512,7 +547,17 @@ namespace BigProject.Client
                 else if (preview.CurrentOrder is CastOrder cast)
                 {
                     SpellDefinition spell = session.Spells.Get(cast.SpellId);
-                    if (spell != null)
+                    if (spell == null || spell.Targeting == TargetKind.Self)
+                    {
+                        continue;
+                    }
+
+                    // Sort sur une unité : seule la case de sa cible. Sort sur une case : toute la zone.
+                    if (spell.Targeting == TargetKind.Unit)
+                    {
+                        castCells.Add(cast.Target);
+                    }
+                    else
                     {
                         castCells.AddRange(SpellArea.GetCells(session.State.Map, spell.AreaShape, spell.AreaRadius, cast.Target));
                     }
@@ -605,6 +650,22 @@ namespace BigProject.Client
             }
 
             SpellDefinition spell = session.Spells.Get(ActiveSpellId);
+            if (spell.Targeting == TargetKind.Unit)
+            {
+                UnitState targetUnit = session.State.GetUnitAt(target);
+                if (targetUnit == null)
+                {
+                    Message = "Clique sur une unité : " + spell.DisplayName + " vise une unité.";
+                    return;
+                }
+
+                TryAppend(
+                    unit,
+                    new CastOrder(ActiveSpellId, targetUnit.Position, targetUnit.Id),
+                    spell.DisplayName + " sur " + targetUnit.Name + " ajouté.");
+                return;
+            }
+
             TryAppend(unit, new CastOrder(ActiveSpellId, target), spell.DisplayName + " ajouté.");
         }
 
@@ -712,6 +773,29 @@ namespace BigProject.Client
             else if (Tool == PlanningTool.Spell && ActiveSpellId != null)
             {
                 SpellDefinition spell = session.Spells.Get(ActiveSpellId);
+                if (spell.Targeting == TargetKind.Unit)
+                {
+                    // On montre les unités que l'on peut viser depuis la position prévue ; au survol, la zone
+                    // qui serait touchée autour de la cible.
+                    List<UnitState> targetable = SpellTargeting.GetTargetableUnits(map, spell, origin, unit, session.State.Units);
+                    var targetCells = new List<GridPosition>();
+                    foreach (UnitState candidate in targetable)
+                    {
+                        targetCells.Add(candidate.Position);
+                    }
+
+                    highlighter.Set(HighlightLayer.CastRange, targetCells);
+
+                    if (hoveredCell.HasValue && targetCells.Contains(hoveredCell.Value))
+                    {
+                        highlighter.Set(
+                            HighlightLayer.Area,
+                            SpellArea.GetCells(map, spell.AreaShape, spell.AreaRadius, hoveredCell.Value));
+                    }
+
+                    return;
+                }
+
                 List<GridPosition> castable = SpellTargeting.GetCastableCells(map, spell, origin);
                 highlighter.Set(HighlightLayer.CastRange, castable);
 

@@ -69,7 +69,7 @@ namespace BigProject.Core.Match
                         maxHealth: 30,
                         maxMana: 8,
                         movementPoints: 4,
-                        spellIds: spells.AllIds));
+                        spellIds: spells.StartingIds));
                     unitId++;
                 }
             }

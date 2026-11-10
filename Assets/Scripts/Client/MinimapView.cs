@@ -59,14 +59,7 @@ namespace BigProject.Client
 
             foreach (UnitState unit in state.Units)
             {
-                var go = new GameObject("Point " + unit.Name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
-                go.transform.SetParent(mapRect, false);
-                var rect = (RectTransform)go.transform;
-                rect.anchorMin = rect.anchorMax = Vector2.zero;
-                rect.pivot = new Vector2(0.5f, 0.5f);
-                var image = go.GetComponent<Image>();
-                image.raycastTarget = false;
-                dots.Add(unit.Id, image);
+                CreateDot(unit);
             }
 
             if (frame != null)
@@ -74,6 +67,19 @@ namespace BigProject.Client
                 frame.SetAsLastSibling();
                 frame.GetComponent<Graphic>().raycastTarget = false;
             }
+        }
+
+        private Image CreateDot(UnitState unit)
+        {
+            var go = new GameObject("Point " + unit.Name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(mapRect, false);
+            var rect = (RectTransform)go.transform;
+            rect.anchorMin = rect.anchorMax = Vector2.zero;
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            var image = go.GetComponent<Image>();
+            image.raycastTarget = false;
+            dots.Add(unit.Id, image);
+            return image;
         }
 
         private void LateUpdate()
@@ -90,7 +96,8 @@ namespace BigProject.Client
 
             foreach (UnitState unit in state.Units)
             {
-                Image dot = dots[unit.Id];
+                // Les invocations apparaissent en cours de match : leur point est créé à la volée.
+                Image dot = dots.TryGetValue(unit.Id, out Image existing) ? existing : CreateDot(unit);
                 dot.gameObject.SetActive(unit.IsAlive);
                 if (!unit.IsAlive)
                 {
