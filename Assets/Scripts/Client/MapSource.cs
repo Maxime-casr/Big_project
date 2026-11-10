@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using BigProject.Core.Grid;
 using BigProject.Core.Match;
 using UnityEngine;
@@ -6,30 +7,29 @@ using UnityEngine.Tilemaps;
 namespace BigProject.Client
 {
     /// <summary>
-    /// Transforme la Tilemap de la scène en carte de jeu, à poser sur l'objet Grid.
-    /// - Chaque case qui a une tuile dans "Sol" est jouable ; une case vide à l'intérieur du sol est un trou.
-    /// - Une tuile de "Sol" listée dans "Tuiles obstacles" (ou présente sur la Tilemap "Obstacles") bloque
-    ///   le passage et la vue ; dans "Tuiles trous" (ou Tilemap "Trous"), elle bloque le passage seulement.
-    /// - Les coordonnées de la Tilemap peuvent être négatives et centrées en .5 : la conversion passe toujours
-    ///   par la Tilemap (GetCellCenterWorld / WorldToCell), jamais par un calcul manuel.
+    /// Transforme les Tilemaps de la scène en carte de jeu, à poser sur l'objet Grid. Tout se dessine à la
+    /// palette de tuiles :
+    /// - "Sol" : chaque case qui a une tuile est jouable ; une case vide à l'intérieur du sol est un trou ;
+    /// - "Obstacles" : une tuile bloque le passage et la vue ;
+    /// - "Départ bleu" / "Départ rouge" : chaque tuile est une case de départ pour un joueur de l'équipe
+    ///   (lues de gauche à droite). S'il en manque, les équipes sont placées automatiquement.
+    /// Les coordonnées des Tilemaps peuvent être négatives et centrées en .5 : la conversion passe toujours
+    /// par la Tilemap (GetCellCenterWorld / WorldToCell), jamais par un calcul manuel.
     /// </summary>
     public sealed class MapSource : MonoBehaviour
     {
         [Header("Sol : toute case avec une tuile est jouable")]
         [SerializeField] private Tilemap ground;
 
-        [Header("Obstacles et trous (optionnel)")]
+        [Header("Obstacles (optionnel) : bloquent le passage et la vue")]
         [SerializeField] private Tilemap obstacles;
-        [SerializeField] private Tilemap pits;
-        [Tooltip("Tuiles du Sol qui bloquent le passage et la vue (murs, rochers...).")]
-        [SerializeField] private TileBase[] obstacleTiles;
-        [Tooltip("Tuiles du Sol qui bloquent le passage mais pas la vue (eau, vide...).")]
-        [SerializeField] private TileBase[] pitTiles;
 
-        [Header("Cases de départ (optionnel)")]
-        [Tooltip("Objets placés sur la carte : un par joueur de l'équipe bleue. Vide = placement automatique.")]
-        [SerializeField] private Transform[] blueSpawns;
-        [SerializeField] private Transform[] redSpawns;
+        [Header("Cases de départ (optionnel) : une tuile = un joueur")]
+        [SerializeField] private Tilemap blueSpawns;
+        [SerializeField] private Tilemap redSpawns;
+
+        [Tooltip("Cache les tuiles de départ pendant le combat : ce ne sont que des repères pour l'éditeur.")]
+        [SerializeField] private bool hideSpawnMarkersInGame = true;
 
         public Tilemap Ground
         {
@@ -37,14 +37,21 @@ namespace BigProject.Client
             {
                 if (ground == null)
                 {
-                    ground = GetComponentInChildren<Tilemap>();
+                    foreach (Tilemap candidate in GetComponentsInChildren<Tilemap>(true))
+                    {
+                        if (candidate != obstacles && candidate != blueSpawns && candidate != redSpawns)
+                        {
+                            ground = candidate;
+                            break;
+                        }
+                    }
                 }
 
                 return ground;
             }
         }
 
-        /// <summary>Taille de la zone de sol (plus petit rectangle contenant toutes les tuiles).</summary>
+        /// <summary>Plus petit rectangle contenant toutes les tuiles du sol. False s'il n'y en a aucune.</summary>
         public bool TryGetGroundBounds(out BoundsInt bounds)
         {
             bounds = default;
@@ -84,13 +91,25 @@ namespace BigProject.Client
             return any;
         }
 
-        /// <summary>La Tilemap de la scène a-t-elle les dimensions de cette carte ?</summary>
+        /// <summary>Le sol de la scène a-t-il les dimensions de cette carte ?</summary>
         public bool Matches(GridMap map)
         {
             return TryGetGroundBounds(out BoundsInt bounds) && bounds.size.x == map.Width && bounds.size.y == map.Height;
         }
 
-        /// <summary>Lit la Tilemap. Retourne null s'il n'y a aucune tuile de sol.</summary>
+        /// <summary>Cache les repères de départ pendant le combat, si l'option est active.</summary>
+        public void HideSpawnMarkers()
+        {
+            if (!hideSpawnMarkersInGame)
+            {
+                return;
+            }
+
+            SetRendererEnabled(blueSpawns, false);
+            SetRendererEnabled(redSpawns, false);
+        }
+
+        /// <summary>Lit les Tilemaps. Retourne null s'il n'y a aucune tuile de sol.</summary>
         public MapDefinition Read()
         {
             if (!TryGetGroundBounds(out BoundsInt bounds))
@@ -109,72 +128,58 @@ namespace BigProject.Client
             }
 
             var definition = new MapDefinition(grid);
-            AddSpawns(definition.BlueSpawns, blueSpawns, bounds);
-            AddSpawns(definition.RedSpawns, redSpawns, bounds);
+            ReadSpawns(blueSpawns, bounds, definition.BlueSpawns);
+            ReadSpawns(redSpawns, bounds, definition.RedSpawns);
             return definition;
         }
 
         private TileType ReadCell(Vector3Int cell)
         {
-            if (obstacles != null && obstacles.HasTile(cell))
-            {
-                return TileType.Obstacle;
-            }
-
-            if (pits != null && pits.HasTile(cell))
+            if (!Ground.HasTile(cell))
             {
                 return TileType.Pit;
             }
 
-            TileBase tile = Ground.GetTile(cell);
-            if (tile == null)
-            {
-                return TileType.Pit;
-            }
-
-            if (Contains(obstacleTiles, tile))
-            {
-                return TileType.Obstacle;
-            }
-
-            return Contains(pitTiles, tile) ? TileType.Pit : TileType.Floor;
+            return obstacles != null && obstacles.HasTile(cell) ? TileType.Obstacle : TileType.Floor;
         }
 
-        private void AddSpawns(System.Collections.Generic.List<GridPosition> target, Transform[] spawns, BoundsInt bounds)
+        /// <summary>Les tuiles de départ, de gauche à droite puis de bas en haut : l'ordre est donc toujours le même.</summary>
+        private static void ReadSpawns(Tilemap source, BoundsInt bounds, List<GridPosition> target)
         {
-            if (spawns == null)
+            if (source == null)
             {
                 return;
             }
 
-            foreach (Transform spawn in spawns)
+            var cells = new List<Vector3Int>();
+            foreach (Vector3Int cell in source.cellBounds.allPositionsWithin)
             {
-                if (spawn == null)
+                if (source.HasTile(cell) && cell.x >= bounds.xMin && cell.x < bounds.xMax &&
+                    cell.y >= bounds.yMin && cell.y < bounds.yMax)
                 {
-                    continue;
+                    cells.Add(cell);
                 }
+            }
 
-                Vector3Int cell = Ground.WorldToCell(spawn.position);
+            cells.Sort((a, b) => a.x != b.x ? a.x.CompareTo(b.x) : a.y.CompareTo(b.y));
+            foreach (Vector3Int cell in cells)
+            {
                 target.Add(new GridPosition(cell.x - bounds.xMin, cell.y - bounds.yMin));
             }
         }
 
-        private static bool Contains(TileBase[] list, TileBase tile)
+        private static void SetRendererEnabled(Tilemap tilemap, bool enabled)
         {
-            if (list == null)
+            if (tilemap == null)
             {
-                return false;
+                return;
             }
 
-            foreach (TileBase candidate in list)
+            var renderer = tilemap.GetComponent<TilemapRenderer>();
+            if (renderer != null)
             {
-                if (candidate == tile)
-                {
-                    return true;
-                }
+                renderer.enabled = enabled;
             }
-
-            return false;
         }
     }
 }

@@ -112,6 +112,7 @@ namespace BigProject.Client
 
             if (source.Matches(map))
             {
+                source.HideSpawnMarkers();
                 return source.Ground;
             }
 

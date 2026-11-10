@@ -2,6 +2,7 @@
     "name": "BigProject.EditorTools",
     "rootNamespace": "BigProject.EditorTools",
     "references": [
+        "BigProject.Core",
         "BigProject.Client"
     ],
     "includePlatforms": [
