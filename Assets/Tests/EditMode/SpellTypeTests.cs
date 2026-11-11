@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using BigProject.Core.Characters;
 using BigProject.Core.Grid;
 using BigProject.Core.Match;
 using BigProject.Core.Net;
@@ -427,6 +428,7 @@ namespace BigProject.Tests
 
             Assert.IsTrue(projection.IsValid);
             CollectionAssert.AreEqual(new[] { P(3, 1) }, projection.SummonCells);
+            CollectionAssert.AreEqual(new[] { "totem" }, projection.SummonCharacterIds);
         }
 
         [Test]
@@ -474,14 +476,19 @@ namespace BigProject.Tests
         }
 
         [Test]
-        public void Catalog_ReportsSummonsThatKnowUnknownSpells()
+        public void Content_ReportsASummonOfAnUnknownCharacter()
         {
             var catalog = new SpellCatalog();
             catalog.Add(new SpellDefinition(
                 "call", "Appel", 1, 0, 3, false, false, AreaShape.Single, 0,
-                new[] { SpellEffect.SummonUnit(new SummonTemplate("Chose", 5, 2, 1, new[] { "inexistant" })) }));
+                new[] { SpellEffect.SummonCharacter("inexistant") }));
+            var characters = new CharacterCatalog();
+            characters.Add(new CharacterDefinition("hero", "Héros", 10, 5, 3, new[] { "call" }));
 
-            Assert.AreEqual(1, catalog.Validate().Count);
+            List<string> errors = ContentRules.FindErrors(catalog, characters);
+
+            Assert.AreEqual(1, errors.Count);
+            StringAssert.Contains("inexistant", errors[0]);
         }
 
         [Test]
@@ -553,7 +560,7 @@ namespace BigProject.Tests
             for (int i = 0; i < 2; i++)
             {
                 LoopbackClient transport = net.CreateClient();
-                sessions.Add(new NetworkMatchSession(transport, spells, "P" + i));
+                sessions.Add(new NetworkMatchSession(transport, spells, "P" + i, "archer"));
                 transport.Connect();
             }
 

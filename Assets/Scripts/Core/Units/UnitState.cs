@@ -23,7 +23,8 @@ namespace BigProject.Core.Units
             int movementPoints,
             IEnumerable<string> spellIds,
             bool isSummon = false,
-            int ownerUnitId = NoOwner)
+            int ownerUnitId = NoOwner,
+            string characterId = "")
         {
             Id = id;
             PlayerId = playerId;
@@ -38,6 +39,7 @@ namespace BigProject.Core.Units
             this.spellIds = new List<string>(spellIds ?? Array.Empty<string>());
             IsSummon = isSummon;
             OwnerUnitId = ownerUnitId;
+            CharacterId = characterId ?? string.Empty;
         }
 
         private UnitState(UnitState other)
@@ -55,6 +57,7 @@ namespace BigProject.Core.Units
             spellIds = new List<string>(other.spellIds);
             IsSummon = other.IsSummon;
             OwnerUnitId = other.OwnerUnitId;
+            CharacterId = other.CharacterId;
         }
 
         public const int NoOwner = -1;
@@ -66,11 +69,15 @@ namespace BigProject.Core.Units
         public int MaxHealth { get; }
         public int MaxMana { get; }
 
+        /// <summary>Le personnage (chevalier, mage...) dont l'unité a les caractéristiques. Sert à choisir son apparence.</summary>
+        public string CharacterId { get; }
+
         /// <summary>Invoquée par un sort : jouée par le joueur qui l'a invoquée, mais ne compte pas pour la victoire.</summary>
         public bool IsSummon { get; }
 
         /// <summary>L'unité qui a invoqué celle-ci (NoOwner pour un personnage de départ).</summary>
         public int OwnerUnitId { get; }
+
         /// <summary>PM disponibles à chaque tour.</summary>
         public int MovementPoints { get; }
         public IReadOnlyList<string> SpellIds => spellIds;

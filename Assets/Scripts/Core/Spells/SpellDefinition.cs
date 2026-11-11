@@ -48,43 +48,26 @@ namespace BigProject.Core.Spells
         /// <summary>Le lanceur apparaît sur la case visée (sort de type Cell).</summary>
         Teleport = 2,
 
-        /// <summary>Une nouvelle unité alliée apparaît sur la case visée (sort de type Cell).</summary>
+        /// <summary>Un personnage apparaît sur la case visée, allié du lanceur (sort de type Cell).</summary>
         Summon = 3
-    }
-
-    /// <summary>Ce qu'est, et ce que sait faire, une unité invoquée.</summary>
-    public sealed class SummonTemplate
-    {
-        public SummonTemplate(string name, int maxHealth, int maxMana, int movementPoints, IEnumerable<string> spellIds)
-        {
-            Name = name;
-            MaxHealth = maxHealth;
-            MaxMana = maxMana;
-            MovementPoints = movementPoints;
-            SpellIds = new List<string>(spellIds ?? new string[0]);
-        }
-
-        public string Name { get; }
-        public int MaxHealth { get; }
-        public int MaxMana { get; }
-        public int MovementPoints { get; }
-        public IReadOnlyList<string> SpellIds { get; }
     }
 
     public sealed class SpellEffect
     {
-        public SpellEffect(SpellEffectKind kind, int amount, TargetFilter targets, SummonTemplate summon = null)
+        public SpellEffect(SpellEffectKind kind, int amount, TargetFilter targets, string characterId = null)
         {
             Kind = kind;
             Amount = amount;
             Targets = targets;
-            Summon = summon;
+            CharacterId = characterId;
         }
 
         public SpellEffectKind Kind { get; }
         public int Amount { get; }
         public TargetFilter Targets { get; }
-        public SummonTemplate Summon { get; }
+
+        /// <summary>Le personnage invoqué (effet d'invocation seulement).</summary>
+        public string CharacterId { get; }
 
         public static SpellEffect Damage(int amount, TargetFilter targets)
         {
@@ -101,9 +84,9 @@ namespace BigProject.Core.Spells
             return new SpellEffect(SpellEffectKind.Teleport, 0, TargetFilter.Self);
         }
 
-        public static SpellEffect SummonUnit(SummonTemplate template)
+        public static SpellEffect SummonCharacter(string characterId)
         {
-            return new SpellEffect(SpellEffectKind.Summon, 0, TargetFilter.None, template);
+            return new SpellEffect(SpellEffectKind.Summon, 0, TargetFilter.None, characterId);
         }
 
         /// <summary>Effets qui agissent sur les PV à l'impact (les autres placent des unités au début de l'action).</summary>
@@ -125,8 +108,7 @@ namespace BigProject.Core.Spells
             int areaRadius,
             IEnumerable<SpellEffect> effects,
             TargetKind targeting = TargetKind.Cell,
-            TargetFilter unitTargets = TargetFilter.Enemies,
-            bool isStartingSpell = true)
+            TargetFilter unitTargets = TargetFilter.Enemies)
         {
             Id = id;
             DisplayName = displayName;
@@ -140,7 +122,6 @@ namespace BigProject.Core.Spells
             Effects = new List<SpellEffect>(effects);
             Targeting = targeting;
             UnitTargets = unitTargets;
-            IsStartingSpell = isStartingSpell;
         }
 
         public string Id { get; }
@@ -161,24 +142,45 @@ namespace BigProject.Core.Spells
         /// <summary>Qui peut être désigné (sorts de type Unit seulement).</summary>
         public TargetFilter UnitTargets { get; }
 
-        /// <summary>Donné à chaque personnage au début d'un match.</summary>
-        public bool IsStartingSpell { get; }
-
         public bool HasEffect(SpellEffectKind kind)
         {
+            return CountEffects(kind) > 0;
+        }
+
+        public int CountEffects(SpellEffectKind kind)
+        {
+            int count = 0;
             foreach (SpellEffect effect in Effects)
             {
                 if (effect.Kind == kind)
                 {
-                    return true;
+                    count++;
                 }
             }
 
-            return false;
+            return count;
+        }
+
+        /// <summary>Le personnage invoqué par ce sort, ou null.</summary>
+        public string SummonedCharacterId
+        {
+            get
+            {
+                foreach (SpellEffect effect in Effects)
+                {
+                    if (effect.Kind == SpellEffectKind.Summon)
+                    {
+                        return effect.CharacterId;
+                    }
+                }
+
+                return null;
+            }
         }
 
         /// <summary>Résumé court des effets, pour les cartes de l'interface.</summary>
-        public string DescribeEffects()
+        /// <param name="characterName">Donne le nom affichable d'un personnage invoqué (son identifiant à défaut).</param>
+        public string DescribeEffects(Func<string, string> characterName = null)
         {
             var parts = new List<string>();
             foreach (SpellEffect effect in Effects)
@@ -195,7 +197,7 @@ namespace BigProject.Core.Spells
                         parts.Add("téléportation");
                         break;
                     case SpellEffectKind.Summon:
-                        parts.Add("invoque " + effect.Summon.Name);
+                        parts.Add("invoque " + (characterName != null ? characterName(effect.CharacterId) : effect.CharacterId));
                         break;
                 }
             }
@@ -223,17 +225,15 @@ namespace BigProject.Core.Spells
             builder.Append(Id).Append('|').Append(ManaCost).Append('|').Append(MinRange).Append('|').Append(MaxRange)
                 .Append('|').Append(RequiresLineOfSight).Append('|').Append(StraightLineOnly)
                 .Append('|').Append((int)AreaShape).Append('|').Append(AreaRadius).Append('|').Append((int)Targeting)
-                .Append('|').Append((int)UnitTargets).Append('|').Append(IsStartingSpell);
+                .Append('|').Append((int)UnitTargets);
 
             foreach (SpellEffect effect in Effects)
             {
                 builder.Append('[').Append((int)effect.Kind).Append(',').Append(effect.Amount).Append(',')
                     .Append((int)effect.Targets);
-                if (effect.Summon != null)
+                if (effect.CharacterId != null)
                 {
-                    builder.Append(',').Append(effect.Summon.Name).Append(',').Append(effect.Summon.MaxHealth)
-                        .Append(',').Append(effect.Summon.MaxMana).Append(',').Append(effect.Summon.MovementPoints)
-                        .Append(',').Append(string.Join("+", effect.Summon.SpellIds));
+                    builder.Append(',').Append(effect.CharacterId);
                 }
 
                 builder.Append(']');

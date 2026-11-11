@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using BigProject.Core.Characters;
 using BigProject.Core.Match;
 using BigProject.Core.Orders;
 using BigProject.Core.Spells;
@@ -30,12 +31,17 @@ namespace BigProject.Core.Resolution
         private readonly IVictoryCondition victoryCondition;
         private readonly Random random;
 
-        public RoundResolver(SpellCatalog spells, IVictoryCondition victoryCondition, Random random = null)
+        /// <param name="characters">Nécessaire aux invocations (le personnage invoqué) ; par défaut, les personnages d'exemple.</param>
+        public RoundResolver(
+            SpellCatalog spells,
+            IVictoryCondition victoryCondition,
+            Random random = null,
+            CharacterCatalog characters = null)
         {
             this.spells = spells;
             this.victoryCondition = victoryCondition;
             this.random = random ?? new Random();
-            spellResolver = new SpellResolver(spells);
+            spellResolver = new SpellResolver(spells, characters ?? CharacterCatalog.CreateDefault());
         }
 
         public RoundResult Resolve(MatchState state, IReadOnlyList<TurnPlan> plans)

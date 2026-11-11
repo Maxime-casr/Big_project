@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using BigProject.Client;
+using BigProject.Core.Characters;
 using BigProject.Core.Spells;
 using UnityEditor;
 using UnityEngine;
@@ -7,10 +8,12 @@ using UnityEngine;
 namespace BigProject.EditorTools
 {
     /// <summary>
-    /// Crée les sorts d'exemple comme de vrais assets (Assets/Resources/Spells), à partir du catalogue intégré.
-    /// Ils servent de modèles : ouvre-les, modifie-les, ou duplique-les (Ctrl+D) pour en créer de nouveaux.
-    /// Création automatique une seule fois, si le dossier Resources/Spells n'existe pas encore ; ensuite,
-    /// uniquement via le menu "Big Project > Sorts > Créer les sorts d'exemple" (qui ne remplace jamais rien).
+    /// Crée les sorts et personnages d'exemple comme de vrais assets (Assets/Resources/Spells et
+    /// Assets/Resources/Characters), à partir des catalogues intégrés. Ils servent de modèles : ouvre-les,
+    /// modifie-les, ou duplique-les (Ctrl+D) pour en créer de nouveaux. Ne remplace jamais un asset existant.
+    /// Création automatique si l'un des deux dossiers n'existe pas encore ; ensuite, via le menu
+    /// "Big Project > Contenu > Créer les sorts et personnages d'exemple".
+    /// Répare aussi les anciens effets d'invocation (avant l'existence des personnages).
     /// </summary>
     [InitializeOnLoad]
     public static class SpellAssetsInstaller
@@ -18,6 +21,7 @@ namespace BigProject.EditorTools
         private const string ResourcesPath = "Assets/Resources";
         private const string SpellsPath = "Assets/Resources/Spells";
         private const string EffectsPath = "Assets/Resources/Spells/Effets";
+        private const string CharactersPath = "Assets/Resources/Characters";
 
         static SpellAssetsInstaller()
         {
@@ -27,41 +31,54 @@ namespace BigProject.EditorTools
         private static void AutoInstall()
         {
             if (EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isCompiling ||
-                AssetDatabase.IsValidFolder(SpellsPath))
+                (AssetDatabase.IsValidFolder(SpellsPath) && AssetDatabase.IsValidFolder(CharactersPath)))
             {
                 return;
             }
 
-            int created = Install();
-            Debug.Log("[Sorts] " + created + " sorts d'exemple créés dans " + SpellsPath +
-                      ". Modifie-les, ou duplique-en un pour créer le tien.");
+            Result result = Install();
+            Debug.Log("[Contenu] " + result.Spells + " sort(s) et " + result.Characters + " personnage(s) d'exemple créés, " +
+                      result.Repaired + " invocation(s) réparée(s). Modifie-les, ou duplique-en un pour créer le tien.");
         }
 
-        [MenuItem("Big Project/Sorts/Créer les sorts d'exemple")]
+        [MenuItem("Big Project/Contenu/Créer les sorts et personnages d'exemple")]
         private static void InstallFromMenu()
         {
-            int created = Install();
+            Result result = Install();
+            bool nothing = result.Spells == 0 && result.Characters == 0 && result.Repaired == 0;
             EditorUtility.DisplayDialog(
-                "Sorts d'exemple",
-                created == 0
-                    ? "Tous les sorts d'exemple existent déjà. Rien n'a été remplacé."
-                    : created + " sort(s) créé(s) dans " + SpellsPath + ".",
+                "Contenu d'exemple",
+                nothing
+                    ? "Tout existe déjà. Rien n'a été remplacé."
+                    : result.Spells + " sort(s) et " + result.Characters + " personnage(s) créé(s), " +
+                      result.Repaired + " invocation(s) réparée(s).",
                 "OK");
         }
 
-        /// <summary>Crée les assets manquants. Retourne le nombre de sorts créés.</summary>
-        private static int Install()
+        private struct Result
+        {
+            public int Spells;
+            public int Characters;
+            public int Repaired;
+        }
+
+        /// <summary>Crée les assets manquants.</summary>
+        private static Result Install()
         {
             EnsureFolder("Assets", "Resources");
             EnsureFolder(ResourcesPath, "Spells");
             EnsureFolder(SpellsPath, "Effets");
+            EnsureFolder(ResourcesPath, "Characters");
 
-            SpellCatalog catalog = SpellCatalog.CreateDefault();
+            SpellCatalog spellCatalog = SpellCatalog.CreateDefault();
+            CharacterCatalog characterCatalog = CharacterCatalog.CreateDefault();
             var spellAssets = new Dictionary<string, SpellAsset>();
+            var characterAssets = new Dictionary<string, CharacterAsset>();
             var newSpells = new List<string>();
+            var newCharacters = new List<string>();
 
-            // 1. Les sorts eux-mêmes : une invocation en référence d'autres, il faut qu'ils existent tous d'abord.
-            foreach (string id in catalog.AllIds)
+            // 1. Les assets vides : sorts, personnages et invocations se référencent entre eux, ils doivent tous exister d'abord.
+            foreach (string id in spellCatalog.AllIds)
             {
                 string path = SpellsPath + "/" + id + ".asset";
                 var existing = AssetDatabase.LoadAssetAtPath<SpellAsset>(path);
@@ -77,23 +94,67 @@ namespace BigProject.EditorTools
                 newSpells.Add(id);
             }
 
+            foreach (string id in characterCatalog.AllIds)
+            {
+                string path = CharactersPath + "/" + id + ".asset";
+                var existing = AssetDatabase.LoadAssetAtPath<CharacterAsset>(path);
+                if (existing != null)
+                {
+                    characterAssets[id] = existing;
+                    continue;
+                }
+
+                var asset = ScriptableObject.CreateInstance<CharacterAsset>();
+                AssetDatabase.CreateAsset(asset, path);
+                characterAssets[id] = asset;
+                newCharacters.Add(id);
+            }
+
             // 2. Leur contenu.
             foreach (string id in newSpells)
             {
-                Fill(spellAssets[id], catalog.Get(id), spellAssets);
+                FillSpell(spellAssets[id], spellCatalog.Get(id), characterAssets);
             }
+
+            foreach (string id in newCharacters)
+            {
+                FillCharacter(characterAssets[id], characterCatalog.Get(id), spellAssets);
+            }
+
+            int repaired = RepairSummonEffects(characterAssets);
 
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
-            return newSpells.Count;
+            return new Result { Spells = newSpells.Count, Characters = newCharacters.Count, Repaired = repaired };
         }
 
-        private static void Fill(SpellAsset asset, SpellDefinition spell, Dictionary<string, SpellAsset> allSpells)
+        private static void FillCharacter(CharacterAsset asset, CharacterDefinition character, Dictionary<string, SpellAsset> spells)
+        {
+            var so = new SerializedObject(asset);
+            so.FindProperty("id").stringValue = character.Id;
+            so.FindProperty("displayName").stringValue = character.DisplayName;
+            so.FindProperty("playable").boolValue = character.IsPlayable;
+            so.FindProperty("maxHealth").intValue = character.MaxHealth;
+            so.FindProperty("maxMana").intValue = character.MaxMana;
+            so.FindProperty("movementPoints").intValue = character.MovementPoints;
+
+            SerializedProperty list = so.FindProperty("spells");
+            list.arraySize = character.SpellIds.Count;
+            for (int i = 0; i < character.SpellIds.Count; i++)
+            {
+                spells.TryGetValue(character.SpellIds[i], out SpellAsset known);
+                list.GetArrayElementAtIndex(i).objectReferenceValue = known;
+            }
+
+            so.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(asset);
+        }
+
+        private static void FillSpell(SpellAsset asset, SpellDefinition spell, Dictionary<string, CharacterAsset> characters)
         {
             var so = new SerializedObject(asset);
             so.FindProperty("id").stringValue = spell.Id;
             so.FindProperty("displayName").stringValue = spell.DisplayName;
-            so.FindProperty("givenToEveryone").boolValue = spell.IsStartingSpell;
             so.FindProperty("manaCost").intValue = spell.ManaCost;
             so.FindProperty("targeting").enumValueIndex = (int)spell.Targeting;
             so.FindProperty("unitTargets").enumValueFlag = (int)spell.UnitTargets;
@@ -108,14 +169,14 @@ namespace BigProject.EditorTools
             effects.arraySize = spell.Effects.Count;
             for (int i = 0; i < spell.Effects.Count; i++)
             {
-                effects.GetArrayElementAtIndex(i).objectReferenceValue = GetOrCreateEffect(spell.Effects[i], allSpells);
+                effects.GetArrayElementAtIndex(i).objectReferenceValue = GetOrCreateEffect(spell.Effects[i], characters);
             }
 
             so.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(asset);
         }
 
-        private static SpellEffectAsset GetOrCreateEffect(SpellEffect effect, Dictionary<string, SpellAsset> allSpells)
+        private static SpellEffectAsset GetOrCreateEffect(SpellEffect effect, Dictionary<string, CharacterAsset> characters)
         {
             switch (effect.Kind)
             {
@@ -141,25 +202,53 @@ namespace BigProject.EditorTools
                     return GetOrCreate<TeleportEffectAsset>("Teleportation", null);
 
                 default:
-                    SummonTemplate template = effect.Summon;
+                    characters.TryGetValue(effect.CharacterId, out CharacterAsset summoned);
                     return GetOrCreate<SummonEffectAsset>(
-                        "Invocation_" + template.Name,
-                        so =>
-                        {
-                            so.FindProperty("summonName").stringValue = template.Name;
-                            so.FindProperty("maxHealth").intValue = template.MaxHealth;
-                            so.FindProperty("maxMana").intValue = template.MaxMana;
-                            so.FindProperty("movementPoints").intValue = template.MovementPoints;
-
-                            SerializedProperty list = so.FindProperty("spells");
-                            list.arraySize = template.SpellIds.Count;
-                            for (int i = 0; i < template.SpellIds.Count; i++)
-                            {
-                                allSpells.TryGetValue(template.SpellIds[i], out SpellAsset known);
-                                list.GetArrayElementAtIndex(i).objectReferenceValue = known;
-                            }
-                        });
+                        "Invoque_" + effect.CharacterId,
+                        so => so.FindProperty("character").objectReferenceValue = summoned);
             }
+        }
+
+        /// <summary>
+        /// Les effets d'invocation d'avant les personnages (« Invocation_Totem ») n'ont pas de personnage : on les
+        /// relie à celui qui porte le même nom (Invocation_Totem -> totem). Les autres sont signalés dans la Console.
+        /// </summary>
+        private static int RepairSummonEffects(Dictionary<string, CharacterAsset> characters)
+        {
+            int repaired = 0;
+            foreach (string guid in AssetDatabase.FindAssets("t:SummonEffectAsset"))
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                var effect = AssetDatabase.LoadAssetAtPath<SummonEffectAsset>(path);
+                if (effect == null || effect.Character != null)
+                {
+                    continue;
+                }
+
+                string guess = effect.name;
+                int underscore = guess.IndexOf('_');
+                if (underscore >= 0)
+                {
+                    guess = guess.Substring(underscore + 1);
+                }
+
+                guess = AssetIds.Slug(guess);
+                if (!characters.TryGetValue(guess, out CharacterAsset character))
+                {
+                    Debug.LogWarning(
+                        "[Contenu] L'effet d'invocation « " + effect.name + " » n'a pas de personnage : " +
+                        "ouvre-le et glisses-en un dans le champ Character.", effect);
+                    continue;
+                }
+
+                var so = new SerializedObject(effect);
+                so.FindProperty("character").objectReferenceValue = character;
+                so.ApplyModifiedPropertiesWithoutUndo();
+                EditorUtility.SetDirty(effect);
+                repaired++;
+            }
+
+            return repaired;
         }
 
         /// <summary>L'effet de ce nom s'il existe déjà (réutilisé par plusieurs sorts), sinon il est créé.</summary>

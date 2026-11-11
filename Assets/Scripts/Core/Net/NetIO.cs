@@ -8,7 +8,7 @@ namespace BigProject.Core.Net
     public static class NetProtocol
     {
         /// <summary>À incrémenter à chaque changement de protocole ou de règles partagées (catalogue de sorts compris).</summary>
-        public const int Version = 4;
+        public const int Version = 5;
     }
 
     /// <summary>Bornes appliquées à tout ce qui est lu sur le réseau : un client malveillant ne peut pas forcer d'allocation géante.</summary>
@@ -72,6 +72,30 @@ namespace BigProject.Core.Net
         public void WriteString(string value)
         {
             WriteBounded(value, NetLimits.MaxStringBytes);
+        }
+
+        /// <summary>
+        /// Un texte libre (pseudo, nom d'unité) : coupé à la limite plutôt que refusé, pour qu'un nom trop long
+        /// ne fasse jamais échouer l'envoi.
+        /// </summary>
+        public void WriteTruncated(string value)
+        {
+            string text = value ?? string.Empty;
+            byte[] bytes = Encoding.UTF8.GetBytes(text);
+            while (bytes.Length > NetLimits.MaxStringBytes && text.Length > 0)
+            {
+                int keep = text.Length - 1;
+                if (keep > 0 && char.IsLowSurrogate(text[text.Length - 1]))
+                {
+                    keep--;
+                }
+
+                text = text.Substring(0, keep);
+                bytes = Encoding.UTF8.GetBytes(text);
+            }
+
+            writer.Write((ushort)bytes.Length);
+            writer.Write(bytes);
         }
 
         /// <summary>Message d'erreur ou de raison : plus long qu'un identifiant, tronqué si besoin.</summary>

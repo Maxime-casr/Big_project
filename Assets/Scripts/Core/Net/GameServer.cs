@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using BigProject.Core.Characters;
 using BigProject.Core.Match;
 using BigProject.Core.Orders;
 using BigProject.Core.Resolution;
@@ -34,6 +35,8 @@ namespace BigProject.Core.Net
         private readonly IServerTransport transport;
         private readonly ServerSettings settings;
         private readonly SpellCatalog spells;
+        private readonly CharacterCatalog characters;
+        private readonly int contentHash;
         private readonly RoundResolver resolver;
         private readonly Random random;
         private readonly Dictionary<int, ClientSlot> clients = new Dictionary<int, ClientSlot>();
@@ -44,7 +47,13 @@ namespace BigProject.Core.Net
         /// <summary>Intervalle minimal entre deux brouillons d'un même joueur (anti-spam).</summary>
         private const double MinDraftInterval = 0.05;
 
-        public GameServer(IServerTransport transport, ServerSettings settings, SpellCatalog spells, Random random = null)
+        /// <param name="characters">Les personnages du jeu ; par défaut, les personnages d'exemple.</param>
+        public GameServer(
+            IServerTransport transport,
+            ServerSettings settings,
+            SpellCatalog spells,
+            Random random = null,
+            CharacterCatalog characters = null)
         {
             if (settings.PlayersPerTeam < 1 || settings.PlayersPerTeam > 4)
             {
@@ -54,9 +63,16 @@ namespace BigProject.Core.Net
             this.transport = transport;
             this.settings = settings;
             this.spells = spells;
+            this.characters = characters ?? CharacterCatalog.CreateDefault();
+            if (this.characters.PlayableIds.Count == 0)
+            {
+                throw new ArgumentException("Le serveur n'a aucun personnage jouable.", nameof(characters));
+            }
+
+            contentHash = ContentRules.ComputeHash(spells, this.characters);
             this.random = random ?? new Random();
             // Le hasard de la résolution (priorité en cas de collision) vient du serveur, jamais d'un client.
-            resolver = new RoundResolver(spells, new LastTeamStandingCondition(), new Random(this.random.Next()));
+            resolver = new RoundResolver(spells, new LastTeamStandingCondition(), new Random(this.random.Next()), this.characters);
 
             transport.MessageReceived += OnMessage;
             transport.ClientDisconnected += OnDisconnected;
@@ -125,12 +141,28 @@ namespace BigProject.Core.Net
                 return;
             }
 
-            if (hello.ContentHash != spells.ComputeHash())
+            if (hello.ContentHash != contentHash)
             {
-                Kick(slot.ConnectionId, "Les sorts du client et du serveur diffèrent. Mets les deux à jour.");
+                Kick(slot.ConnectionId, "Les sorts ou personnages du client et du serveur diffèrent. Mets les deux à jour.");
                 return;
             }
 
+            // Le personnage est choisi par le client, mais c'est le serveur qui décide : inconnu ou non jouable
+            // (une invocation, par exemple) est refusé. Sans choix, le premier personnage jouable est attribué.
+            string wanted = hello.CharacterId;
+            if (string.IsNullOrEmpty(wanted))
+            {
+                wanted = characters.PlayableIds[0];
+            }
+
+            CharacterDefinition character = characters.Get(wanted);
+            if (character == null || !character.IsPlayable)
+            {
+                Kick(slot.ConnectionId, "Personnage inconnu ou non jouable.");
+                return;
+            }
+
+            slot.CharacterId = character.Id;
             slot.Name = string.IsNullOrWhiteSpace(hello.PlayerName) ? "Joueur" : hello.PlayerName;
             queue.Add(slot);
             BroadcastQueueStatus();
@@ -253,7 +285,14 @@ namespace BigProject.Core.Net
 
         private void StartRoom(List<ClientSlot> players)
         {
-            MatchState state = MatchFactory.CreateTeamMatch(new MatchConfig(), spells, settings.PlayersPerTeam, settings.Map);
+            var characterIds = new List<string>(players.Count);
+            foreach (ClientSlot player in players)
+            {
+                characterIds.Add(player.CharacterId);
+            }
+
+            MatchState state = MatchFactory.CreateTeamMatch(
+                new MatchConfig(), characters, settings.PlayersPerTeam, settings.Map, characterIds);
             float timeout = settings.PlanningSeconds > 0f ? settings.PlanningSeconds + settings.GraceSeconds : 0f;
             var room = new Room { Match = new AuthoritativeMatch(state, resolver, timeout) };
             room.Match.RoundResolved += result => OnRoundResolved(room, result);
@@ -399,6 +438,7 @@ namespace BigProject.Core.Net
         {
             public int ConnectionId;
             public string Name;
+            public string CharacterId;
             public Room Room;
             public int PlayerId;
             public double LastDraftTime = -1;

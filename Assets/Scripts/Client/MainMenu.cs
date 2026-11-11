@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using BigProject.Core.Match;
 using BigProject.Core.Net;
 using BigProject.Core.Spells;
@@ -20,7 +21,11 @@ namespace BigProject.Client
             Server
         }
 
+        private const string CharacterPrefKey = "BigProject.Character";
+
         private MenuState state = MenuState.Menu;
+        private List<GameContent.CharacterInfo> characterChoices = new List<GameContent.CharacterInfo>();
+        private int characterIndex;
         private string address = "localhost";
         private string portText = "7777";
         private string playerName = "Joueur";
@@ -35,6 +40,7 @@ namespace BigProject.Client
         private void Start()
         {
             message = GameFlow.MenuMessage;
+            LoadCharacterChoices();
 
             if (Application.isBatchMode || HasArgument("-server"))
             {
@@ -52,6 +58,13 @@ namespace BigProject.Client
                 returnToMenuRequested = false;
                 GameFlow.ReturnToMenu(returnToMenuMessage);
             }
+        }
+
+        private void LoadCharacterChoices()
+        {
+            characterChoices = GameContent.GetPlayableCharacters();
+            string saved = PlayerPrefs.GetString(CharacterPrefKey, string.Empty);
+            characterIndex = Mathf.Max(0, characterChoices.FindIndex(c => c.Id == saved));
         }
 
         private void OnDestroy()
@@ -103,9 +116,11 @@ namespace BigProject.Client
                 }
 
                 GUILayout.Space(8f);
+                DrawCharacterPicker();
+                GUILayout.Space(4f);
                 if (GUILayout.Button("Combat local (test)", GUILayout.Height(36f)))
                 {
-                    GameFlow.StartLocalTest();
+                    GameFlow.StartLocalTest(SelectedCharacterId);
                 }
 
                 GUILayout.Space(10f);
@@ -128,6 +143,46 @@ namespace BigProject.Client
             });
         }
 
+        private string SelectedCharacterId =>
+            characterChoices.Count == 0 ? string.Empty : characterChoices[characterIndex].Id;
+
+        /// <summary>Le choix du personnage : deux flèches, son nom, ses stats et ses sorts.</summary>
+        private void DrawCharacterPicker()
+        {
+            if (characterChoices.Count == 0)
+            {
+                GUILayout.Label("Aucun personnage jouable (voir Assets/Resources/Characters).");
+                return;
+            }
+
+            GUILayout.Label("<b>Personnage</b>", RichLabel());
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("<", GUILayout.Width(36f), GUILayout.Height(28f)))
+            {
+                ChangeCharacter(-1);
+            }
+
+            GUILayout.Label("<b>" + characterChoices[characterIndex].Name + "</b>", CenteredLabel(), GUILayout.Height(28f));
+            if (GUILayout.Button(">", GUILayout.Width(36f), GUILayout.Height(28f)))
+            {
+                ChangeCharacter(1);
+            }
+
+            GUILayout.EndHorizontal();
+            GUILayout.Label(characterChoices[characterIndex].Summary);
+        }
+
+        private void ChangeCharacter(int step)
+        {
+            characterIndex = (characterIndex + step + characterChoices.Count) % characterChoices.Count;
+            PlayerPrefs.SetString(CharacterPrefKey, characterChoices[characterIndex].Id);
+        }
+
+        private static GUIStyle CenteredLabel()
+        {
+            return new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, richText = true };
+        }
+
         private void ConnectOnline()
         {
             if (!ushort.TryParse(portText, out ushort port))
@@ -137,7 +192,8 @@ namespace BigProject.Client
             }
 
             queueMessage = string.Empty;
-            onlineSession = GameFlow.Runner.StartClient(address, port, playerName, GameContent.LoadSpells());
+            onlineSession = GameFlow.Runner.StartClient(
+                address, port, playerName, SelectedCharacterId, GameContent.LoadSpells(), GameContent.LoadCharacters());
             onlineSession.QueueChanged += OnQueueChanged;
             onlineSession.MatchStarted += OnMatchStarted;
             onlineSession.Failed += OnNetworkFailed;
@@ -163,7 +219,7 @@ namespace BigProject.Client
                 Map = LoadServerMap()
             };
 
-            GameFlow.Runner.StartServer((ushort)port, settings, GameContent.LoadSpells());
+            GameFlow.Runner.StartServer((ushort)port, settings, GameContent.LoadSpells(), GameContent.LoadCharacters());
             state = MenuState.Server;
             Debug.Log("Serveur démarré sur le port " + port + " (" + playersPerTeam + " joueur(s) par équipe).");
         }

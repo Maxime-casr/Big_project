@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using BigProject.Core.Characters;
 using BigProject.Core.Grid;
 using BigProject.Core.Match;
 using BigProject.Core.Net;
@@ -281,7 +282,7 @@ namespace BigProject.Tests
         [Test]
         public void LocalSession_ResolvesWhenTheTimerExpires()
         {
-            var state = MatchFactory.CreateTeamMatch(new MatchConfig(), spells, 1);
+            var state = MatchFactory.CreateTeamMatch(new MatchConfig(), CharacterCatalog.CreateDefault(), 1);
             var local = new LocalMatchSession(state, spells, new RoundResolver(spells, new LastTeamStandingCondition()), 20f, 1f);
 
             Assert.AreEqual(20f, local.PlanningSecondsRemaining, 0.001f);
@@ -500,7 +501,7 @@ namespace BigProject.Tests
             var grid = new GridMap(20, 13) { OriginX = -1, OriginY = -1 };
             grid.SetTile(new GridPosition(3, 3), TileType.Obstacle);
             var definition = new MapDefinition(grid);
-            MatchState original = MatchFactory.CreateTeamMatch(new MatchConfig(), spells, 3, definition);
+            MatchState original = MatchFactory.CreateTeamMatch(new MatchConfig(), CharacterCatalog.CreateDefault(), 3, definition);
 
             var decoded = (MatchStartedMessage)MessageCodec.Decode(
                 MessageCodec.Encode(new MatchStartedMessage(0, 20f, MatchSnapshot.From(original))));
@@ -520,7 +521,7 @@ namespace BigProject.Tests
             grid.SetTile(new GridPosition(1, 4), TileType.Obstacle);
             grid.SetTile(new GridPosition(18, 6), TileType.Pit);
 
-            MatchState state = MatchFactory.CreateTeamMatch(new MatchConfig(), spells, 3, new MapDefinition(grid));
+            MatchState state = MatchFactory.CreateTeamMatch(new MatchConfig(), CharacterCatalog.CreateDefault(), 3, new MapDefinition(grid));
 
             Assert.AreEqual(6, state.Units.Count);
             var seen = new HashSet<GridPosition>();
@@ -538,7 +539,7 @@ namespace BigProject.Tests
             definition.BlueSpawns.Add(new GridPosition(0, 0));
             definition.RedSpawns.Add(new GridPosition(9, 9));
 
-            MatchState state = MatchFactory.CreateTeamMatch(new MatchConfig(), spells, 1, definition);
+            MatchState state = MatchFactory.CreateTeamMatch(new MatchConfig(), CharacterCatalog.CreateDefault(), 1, definition);
 
             Assert.AreEqual(new GridPosition(0, 0), state.GetUnit(1).Position);
             Assert.AreEqual(new GridPosition(9, 9), state.GetUnit(2).Position);
@@ -547,7 +548,7 @@ namespace BigProject.Tests
         [Test]
         public void Snapshot_RebuildsAnIdenticalState()
         {
-            MatchState original = MatchFactory.CreateTeamMatch(new MatchConfig(), spells, 3);
+            MatchState original = MatchFactory.CreateTeamMatch(new MatchConfig(), CharacterCatalog.CreateDefault(), 3);
             original.GetUnit(2).ChangeHealth(-7);
 
             var decoded = (MatchStartedMessage)MessageCodec.Decode(

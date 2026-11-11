@@ -44,10 +44,15 @@ namespace BigProject.Client
             runner = null;
             OnlineSession = null;
             MenuMessage = string.Empty;
+            LocalTestCharacterId = string.Empty;
         }
 
-        public static void StartLocalTest()
+        /// <summary>Personnage choisi au menu pour le combat local : il est le premier de l'équipe bleue.</summary>
+        public static string LocalTestCharacterId { get; private set; } = string.Empty;
+
+        public static void StartLocalTest(string characterId)
         {
+            LocalTestCharacterId = characterId ?? string.Empty;
             OnlineSession = null;
             SceneManager.LoadScene(CombatSceneName);
         }

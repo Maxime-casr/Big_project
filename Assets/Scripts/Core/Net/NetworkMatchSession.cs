@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using BigProject.Core.Characters;
 using BigProject.Core.Match;
 using BigProject.Core.Orders;
 using BigProject.Core.Resolution;
@@ -17,16 +18,27 @@ namespace BigProject.Core.Net
     {
         private readonly IClientTransport transport;
         private readonly string playerName;
+        private readonly string characterId;
+        private readonly int contentHash;
         private float planningRemaining;
         private float planningSeconds;
         private bool hasConnected;
         private readonly Dictionary<int, IReadOnlyList<UnitOrder>> allyDrafts = new Dictionary<int, IReadOnlyList<UnitOrder>>();
 
-        public NetworkMatchSession(IClientTransport transport, SpellCatalog spells, string playerName)
+        /// <param name="characterId">Le personnage voulu ; vide pour laisser le serveur choisir.</param>
+        /// <param name="characters">Les personnages du jeu (pour l'empreinte du contenu) ; par défaut, ceux d'exemple.</param>
+        public NetworkMatchSession(
+            IClientTransport transport,
+            SpellCatalog spells,
+            string playerName,
+            string characterId = "",
+            CharacterCatalog characters = null)
         {
             this.transport = transport;
             this.playerName = playerName;
+            this.characterId = characterId ?? string.Empty;
             Spells = spells;
+            contentHash = ContentRules.ComputeHash(spells, characters ?? CharacterCatalog.CreateDefault());
 
             transport.Connected += OnConnected;
             transport.Disconnected += OnDisconnected;
@@ -92,7 +104,8 @@ namespace BigProject.Core.Net
         private void OnConnected()
         {
             hasConnected = true;
-            transport.Send(MessageCodec.Encode(new HelloMessage(NetProtocol.Version, playerName, Spells.ComputeHash())));
+            transport.Send(MessageCodec.Encode(
+                new HelloMessage(NetProtocol.Version, playerName, contentHash, characterId)));
         }
 
         private void OnDisconnected()

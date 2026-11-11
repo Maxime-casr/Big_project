@@ -12,9 +12,4 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ab5e11d6f30d1a54e9413e29d766b5ee, type: 3}
   m_Name: Invocation_Totem
   m_EditorClassIdentifier: BigProject.Client::BigProject.Client.SummonEffectAsset
-  summonName: Totem
-  maxHealth: 12
-  maxMana: 4
-  movementPoints: 0
-  spells:
-  - {fileID: 11400000, guid: 180badb9f9a08324597f3153da750e86, type: 2}
+  character: {fileID: 11400000, guid: 13b33bb629c18c04d896c72077ef1d95, type: 2}

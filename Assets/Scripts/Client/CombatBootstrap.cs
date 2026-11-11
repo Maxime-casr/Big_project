@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using BigProject.Core.Characters;
 using BigProject.Core.Match;
 using BigProject.Core.Net;
 using BigProject.Core.Resolution;
@@ -87,12 +88,23 @@ namespace BigProject.Client
         private IMatchSession CreateLocalTestSession(out IEnumerable<int> localPlayers)
         {
             SpellCatalog spells = GameContent.LoadSpells();
+            CharacterCatalog characters = GameContent.LoadCharacters();
 
             // La carte du combat local est celle de la Tilemap de la scène, à défaut la carte par défaut.
             MapSource source = FindAnyObjectByType<MapSource>();
             MapDefinition map = source != null ? source.Read() : null;
-            MatchState match = MatchFactory.CreateTeamMatch(new MatchConfig(), spells, 3, map);
-            var resolver = new RoundResolver(spells, new LastTeamStandingCondition());
+
+            // Les personnages jouables défilent d'un slot à l'autre, en commençant par celui choisi au menu.
+            var playable = new List<string>(characters.PlayableIds);
+            int start = Mathf.Max(0, playable.IndexOf(GameFlow.LocalTestCharacterId));
+            var ids = new List<string>();
+            for (int i = 0; i < playable.Count; i++)
+            {
+                ids.Add(playable[(start + i) % playable.Count]);
+            }
+
+            MatchState match = MatchFactory.CreateTeamMatch(new MatchConfig(), characters, 3, map, ids);
+            var resolver = new RoundResolver(spells, new LastTeamStandingCondition(), null, characters);
 
             var players = new List<int>();
             foreach (UnitState unit in match.Units)

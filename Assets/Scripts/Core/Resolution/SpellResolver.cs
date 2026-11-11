@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using BigProject.Core.Characters;
 using BigProject.Core.Grid;
 using BigProject.Core.Match;
 using BigProject.Core.Orders;
@@ -63,10 +64,12 @@ namespace BigProject.Core.Resolution
     public sealed class SpellResolver
     {
         private readonly SpellCatalog spells;
+        private readonly CharacterCatalog characters;
 
-        public SpellResolver(SpellCatalog spells)
+        public SpellResolver(SpellCatalog spells, CharacterCatalog characters)
         {
             this.spells = spells;
+            this.characters = characters;
         }
 
         /// <summary>
@@ -124,18 +127,20 @@ namespace BigProject.Core.Resolution
                     }
                     else if (effect.Kind == SpellEffectKind.Summon)
                     {
+                        CharacterDefinition character = characters.Get(effect.CharacterId);
                         var summoned = new UnitState(
                             nextUnitId++,
                             caster.PlayerId,
                             caster.TeamId,
-                            effect.Summon.Name + " de " + caster.Name,
+                            character.DisplayName + " de " + caster.Name,
                             order.Target,
-                            effect.Summon.MaxHealth,
-                            effect.Summon.MaxMana,
-                            effect.Summon.MovementPoints,
-                            effect.Summon.SpellIds,
+                            character.MaxHealth,
+                            character.MaxMana,
+                            character.MovementPoints,
+                            character.SpellIds,
                             isSummon: true,
-                            ownerUnitId: caster.Id);
+                            ownerUnitId: caster.Id,
+                            characterId: character.Id);
                         batch.Placements.Add(PendingMove.Summon(caster.Id, summoned, spell.Id));
                         pendingSummons[caster.PlayerId] = (pendingSummons.TryGetValue(caster.PlayerId, out int n) ? n : 0) + 1;
                     }
@@ -195,6 +200,11 @@ namespace BigProject.Core.Resolution
 
             if (spell.HasEffect(SpellEffectKind.Summon))
             {
+                if (characters.Get(spell.SummonedCharacterId) == null)
+                {
+                    return "Invocation inconnue.";
+                }
+
                 pendingSummons.TryGetValue(caster.PlayerId, out int already);
                 if (state.CountLivingSummons(caster.PlayerId) + already >= state.Config.MaxSummonsPerPlayer)
                 {

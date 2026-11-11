@@ -1,3 +1,4 @@
+using BigProject.Core.Characters;
 using BigProject.Core.Net;
 using BigProject.Core.Spells;
 using kcp2k;
@@ -22,17 +23,18 @@ namespace BigProject.Online
         public int QueuedPlayerCount => server?.QueuedPlayerCount ?? 0;
         public int ActiveMatchCount => server?.ActiveMatchCount ?? 0;
 
-        public void StartServer(ushort port, ServerSettings settings, SpellCatalog spells)
+        public void StartServer(ushort port, ServerSettings settings, SpellCatalog spells, CharacterCatalog characters)
         {
             Shutdown();
             CreateManager(port);
             manager.StartServer();
 
             serverTransport = new MirrorServerTransport();
-            server = new GameServer(serverTransport, settings, spells);
+            server = new GameServer(serverTransport, settings, spells, null, characters);
         }
 
-        public NetworkMatchSession StartClient(string address, ushort port, string playerName, SpellCatalog spells)
+        public NetworkMatchSession StartClient(
+            string address, ushort port, string playerName, string characterId, SpellCatalog spells, CharacterCatalog characters)
         {
             Shutdown();
             CreateManager(port);
@@ -40,7 +42,7 @@ namespace BigProject.Online
             manager.StartClient();
 
             clientTransport = new MirrorClientTransport();
-            clientSession = new NetworkMatchSession(clientTransport, spells, playerName);
+            clientSession = new NetworkMatchSession(clientTransport, spells, playerName, characterId, characters);
             return clientSession;
         }
 

@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using System.Text;
+using BigProject.Core;
 using BigProject.Core.Spells;
 using UnityEngine;
 
@@ -19,8 +19,6 @@ namespace BigProject.Client
         [SerializeField] private string displayName = "Nouveau sort";
         [TextArea] [SerializeField] private string description;
         [SerializeField] private Sprite icon;
-        [Tooltip("Donné à chaque personnage au début d'un match. Décoche pour un sort réservé à une invocation.")]
-        [SerializeField] private bool givenToEveryone = true;
 
         [Header("Coût")]
         [Min(0)] [SerializeField] private int manaCost = 2;
@@ -46,9 +44,11 @@ namespace BigProject.Client
         public string DisplayName => displayName;
         public string Description => description;
         public Sprite Icon => icon;
+        public int ManaCost => manaCost;
+        public TargetKind Targeting => targeting;
 
         /// <summary>L'identifiant du sort : celui saisi, sinon le nom de l'asset mis en forme.</summary>
-        public string Id => string.IsNullOrWhiteSpace(id) ? Slug(name) : id.Trim();
+        public string Id => string.IsNullOrWhiteSpace(id) ? AssetIds.Slug(name) : id.Trim();
 
         public SpellDefinition ToDefinition()
         {
@@ -67,13 +67,18 @@ namespace BigProject.Client
             return new SpellDefinition(
                 Id, string.IsNullOrWhiteSpace(displayName) ? Id : displayName,
                 manaCost, minRange, maxRange, requiresLineOfSight, straightLineOnly,
-                areaShape, areaRadius, list, targeting, unitTargets, givenToEveryone);
+                areaShape, areaRadius, list, targeting, unitTargets);
         }
 
         private void OnValidate()
         {
             minRange = Mathf.Max(0, minRange);
             maxRange = Mathf.Max(minRange, maxRange);
+
+            if (!IdRules.IsValid(Id))
+            {
+                Debug.LogWarning("Identifiant « " + Id + " » invalide : " + IdRules.Description, this);
+            }
 
             if (effects == null)
             {
@@ -89,17 +94,6 @@ namespace BigProject.Client
                     break;
                 }
             }
-        }
-
-        private static string Slug(string text)
-        {
-            var builder = new StringBuilder();
-            foreach (char c in text.ToLowerInvariant())
-            {
-                builder.Append(char.IsLetterOrDigit(c) && c < 128 ? c : '_');
-            }
-
-            return builder.ToString().Trim('_');
         }
     }
 }

@@ -309,7 +309,7 @@ namespace BigProject.Client
                 }
 
                 string label = "<b>" + spell.DisplayName + "</b>\n" + spell.ManaCost + " mana\n" +
-                               spell.DescribeTargeting() + "\n" + spell.DescribeEffects();
+                               spell.DescribeTargeting() + "\n" + spell.DescribeEffects(GameContent.GetCharacterName);
                 Button button = CreateButton(cardContainer, "Carte " + spell.Id, label, 120f, 11);
 
                 Sprite icon = GameContent.GetIcon(spellId);

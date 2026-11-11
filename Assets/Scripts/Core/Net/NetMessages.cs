@@ -28,35 +28,43 @@ namespace BigProject.Core.Net
     }
 
     /// <summary>
-    /// Premier message d'un client : version du protocole, empreinte des sorts et pseudo. Place le joueur dans
-    /// la file. Le serveur refuse un client dont les règles (version ou sorts) diffèrent des siennes.
+    /// Premier message d'un client : version du protocole, empreinte du contenu (sorts et personnages), pseudo
+    /// et personnage choisi. Place le joueur dans la file. Le serveur refuse un client dont les règles
+    /// (version ou contenu) diffèrent des siennes.
     /// </summary>
     public sealed class HelloMessage : NetMessage
     {
-        public HelloMessage(int protocolVersion, string playerName, int contentHash = 0)
+        public HelloMessage(int protocolVersion, string playerName, int contentHash = 0, string characterId = "")
         {
             ProtocolVersion = protocolVersion;
             PlayerName = playerName;
             ContentHash = contentHash;
+            CharacterId = characterId ?? string.Empty;
         }
 
         public int ProtocolVersion { get; }
         public string PlayerName { get; }
         public int ContentHash { get; }
+
+        /// <summary>Le personnage voulu. Vide : le serveur en attribue un.</summary>
+        public string CharacterId { get; }
+
         public override MessageType Type => MessageType.Hello;
 
         internal override void Write(NetWriter writer)
         {
             writer.WriteInt(ProtocolVersion);
             writer.WriteInt(ContentHash);
-            writer.WriteString(PlayerName);
+            writer.WriteString(CharacterId);
+            writer.WriteTruncated(PlayerName);
         }
 
         internal static HelloMessage Read(NetReader reader)
         {
             int version = reader.ReadInt();
             int hash = reader.ReadInt();
-            return new HelloMessage(version, reader.ReadString(), hash);
+            string characterId = reader.ReadString();
+            return new HelloMessage(version, reader.ReadString(), hash, characterId);
         }
     }
 

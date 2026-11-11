@@ -21,6 +21,7 @@ namespace BigProject.Core.Net
         public int MovementPoints;
         public bool IsSummon;
         public int OwnerUnitId = UnitState.NoOwner;
+        public string CharacterId = string.Empty;
         public List<string> SpellIds = new List<string>();
     }
 
@@ -85,6 +86,7 @@ namespace BigProject.Core.Net
                     MovementPoints = unit.MovementPoints,
                     IsSummon = unit.IsSummon,
                     OwnerUnitId = unit.OwnerUnitId,
+                    CharacterId = unit.CharacterId,
                     SpellIds = new List<string>(unit.SpellIds)
                 });
             }
@@ -135,7 +137,7 @@ namespace BigProject.Core.Net
             var unit = new UnitState(
                 data.Id, data.PlayerId, data.TeamId, data.Name, position,
                 data.MaxHealth, data.MaxMana, data.MovementPoints, data.SpellIds,
-                data.IsSummon, data.OwnerUnitId);
+                data.IsSummon, data.OwnerUnitId, data.CharacterId);
             unit.ApplyStatus(position, data.Health, data.Mana);
             return unit;
         }
@@ -210,7 +212,8 @@ namespace BigProject.Core.Net
                 writer.WriteInt(unit.Id);
                 writer.WriteInt(unit.PlayerId);
                 writer.WriteInt(unit.TeamId);
-                writer.WriteString(unit.Name);
+                writer.WriteTruncated(unit.Name);
+                writer.WriteString(unit.CharacterId);
                 writer.WriteInt(unit.X);
                 writer.WriteInt(unit.Y);
                 writer.WriteInt(unit.Health);
@@ -270,6 +273,7 @@ namespace BigProject.Core.Net
                     PlayerId = reader.ReadInt(),
                     TeamId = reader.ReadInt(),
                     Name = reader.ReadString(),
+                    CharacterId = reader.ReadString(),
                     X = reader.ReadInt(),
                     Y = reader.ReadInt(),
                     Health = reader.ReadInt(),

@@ -12,24 +12,6 @@ namespace BigProject.Core.Spells
 
         public IReadOnlyList<string> AllIds => orderedIds;
 
-        /// <summary>Les sorts donnés à chaque personnage au début d'un match, dans l'ordre d'ajout.</summary>
-        public IReadOnlyList<string> StartingIds
-        {
-            get
-            {
-                var ids = new List<string>();
-                foreach (string id in orderedIds)
-                {
-                    if (byId[id].IsStartingSpell)
-                    {
-                        ids.Add(id);
-                    }
-                }
-
-                return ids;
-            }
-        }
-
         public void Add(SpellDefinition spell)
         {
             if (spell == null)
@@ -37,9 +19,10 @@ namespace BigProject.Core.Spells
                 throw new ArgumentNullException(nameof(spell));
             }
 
-            if (string.IsNullOrWhiteSpace(spell.Id))
+            if (!IdRules.IsValid(spell.Id))
             {
-                throw new InvalidOperationException("Un sort n'a pas d'identifiant.");
+                throw new InvalidOperationException(
+                    "Identifiant de sort invalide « " + spell.Id + " » (" + IdRules.Description + ").");
             }
 
             if (byId.ContainsKey(spell.Id))
@@ -52,18 +35,28 @@ namespace BigProject.Core.Spells
                 throw new InvalidOperationException("Valeurs invalides (portée, coût ou zone) pour le sort " + spell.Id + ".");
             }
 
-            if ((spell.HasEffect(SpellEffectKind.Teleport) || spell.HasEffect(SpellEffectKind.Summon)) &&
-                spell.Targeting != TargetKind.Cell)
+            bool teleports = spell.HasEffect(SpellEffectKind.Teleport);
+            bool summons = spell.HasEffect(SpellEffectKind.Summon);
+
+            if ((teleports || summons) && spell.Targeting != TargetKind.Cell)
             {
                 throw new InvalidOperationException(
                     "Le sort " + spell.Id + " téléporte ou invoque : il doit viser une case (type Cell).");
             }
 
+            // Une téléportation et une invocation visent toutes deux la case ciblée : en combiner ou en
+            // multiplier les ferait se bloquer entre elles.
+            if (spell.CountEffects(SpellEffectKind.Teleport) + spell.CountEffects(SpellEffectKind.Summon) > 1)
+            {
+                throw new InvalidOperationException(
+                    "Le sort " + spell.Id + " a plusieurs effets de téléportation ou d'invocation : un seul est permis.");
+            }
+
             foreach (SpellEffect effect in spell.Effects)
             {
-                if (effect.Kind == SpellEffectKind.Summon && effect.Summon == null)
+                if (effect.Kind == SpellEffectKind.Summon && !IdRules.IsValid(effect.CharacterId))
                 {
-                    throw new InvalidOperationException("Le sort " + spell.Id + " invoque sans définir l'invocation.");
+                    throw new InvalidOperationException("Le sort " + spell.Id + " invoque sans personnage valide.");
                 }
             }
 
@@ -75,32 +68,6 @@ namespace BigProject.Core.Spells
         public SpellDefinition Get(string id)
         {
             return id != null && byId.TryGetValue(id, out SpellDefinition spell) ? spell : null;
-        }
-
-        /// <summary>Problèmes de cohérence du catalogue (sorts d'invocation qui n'existent pas...). Vide si tout va bien.</summary>
-        public List<string> Validate()
-        {
-            var problems = new List<string>();
-            foreach (string id in orderedIds)
-            {
-                foreach (SpellEffect effect in byId[id].Effects)
-                {
-                    if (effect.Summon == null)
-                    {
-                        continue;
-                    }
-
-                    foreach (string summonSpell in effect.Summon.SpellIds)
-                    {
-                        if (!byId.ContainsKey(summonSpell))
-                        {
-                            problems.Add("Le sort " + id + " invoque une unité qui connaît « " + summonSpell + " », introuvable.");
-                        }
-                    }
-                }
-            }
-
-            return problems;
         }
 
         /// <summary>
@@ -118,16 +85,7 @@ namespace BigProject.Core.Spells
                 byId[id].AppendTo(builder);
             }
 
-            unchecked
-            {
-                int hash = (int)2166136261;
-                foreach (char c in builder.ToString())
-                {
-                    hash = (hash ^ c) * 16777619;
-                }
-
-                return hash;
-            }
+            return Hashing.Fnv1a(builder.ToString());
         }
 
         /// <summary>Sorts d'exemple. Les assets de l'éditeur sont créés à partir de cette liste au premier lancement.</summary>
@@ -176,11 +134,27 @@ namespace BigProject.Core.Spells
                 "totem", "Totem", manaCost: 4, minRange: 1, maxRange: 3,
                 requiresLineOfSight: false, straightLineOnly: false,
                 areaShape: AreaShape.Single, areaRadius: 0,
-                effects: new[]
-                {
-                    SpellEffect.SummonUnit(new SummonTemplate("Totem", maxHealth: 12, maxMana: 4, movementPoints: 0,
-                        spellIds: new[] { "piercing_arrow" }))
-                }));
+                effects: new[] { SpellEffect.SummonCharacter("totem") }));
+
+            catalog.Add(new SpellDefinition(
+                "sword_strike", "Coup d'épée", manaCost: 2, minRange: 1, maxRange: 1,
+                requiresLineOfSight: false, straightLineOnly: false,
+                areaShape: AreaShape.Single, areaRadius: 0,
+                effects: new[] { SpellEffect.Damage(8, TargetFilter.Enemies) },
+                targeting: TargetKind.Unit, unitTargets: TargetFilter.Enemies));
+
+            catalog.Add(new SpellDefinition(
+                "charge", "Charge", manaCost: 3, minRange: 2, maxRange: 3,
+                requiresLineOfSight: false, straightLineOnly: false,
+                areaShape: AreaShape.Single, areaRadius: 0,
+                effects: new[] { SpellEffect.Teleport() }));
+
+            catalog.Add(new SpellDefinition(
+                "quick_shot", "Tir rapide", manaCost: 1, minRange: 2, maxRange: 6,
+                requiresLineOfSight: true, straightLineOnly: false,
+                areaShape: AreaShape.Single, areaRadius: 0,
+                effects: new[] { SpellEffect.Damage(3, TargetFilter.Enemies) },
+                targeting: TargetKind.Unit, unitTargets: TargetFilter.Enemies));
 
             return catalog;
         }

@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
+using BigProject.Core.Characters;
 using BigProject.Core.Grid;
-using BigProject.Core.Spells;
 using BigProject.Core.Units;
 
 namespace BigProject.Core.Match
@@ -11,12 +11,6 @@ namespace BigProject.Core.Match
     {
         public const int TeamBlue = 0;
         public const int TeamRed = 1;
-
-        /// <summary>3 joueurs contre 3 joueurs sur la carte par défaut, une unité par joueur.</summary>
-        public static MatchState CreateDemo3v3(MatchConfig config, SpellCatalog spells)
-        {
-            return CreateTeamMatch(config, spells, 3);
-        }
 
         /// <summary>Carte codée en dur, utilisée quand aucune carte n'est fournie.</summary>
         public static MapDefinition CreateDefaultMap()
@@ -35,16 +29,28 @@ namespace BigProject.Core.Match
         /// N joueurs contre N joueurs, une unité par joueur. Les joueurs 0..N-1 forment l'équipe bleue,
         /// les suivants l'équipe rouge ; l'identifiant d'unité est l'identifiant de joueur + 1.
         /// </summary>
+        /// <param name="characters">Les personnages disponibles : chaque unité en reçoit les stats et les sorts.</param>
         /// <param name="map">Carte à utiliser ; null pour la carte par défaut.</param>
+        /// <param name="characterIds">
+        /// Le personnage de chaque joueur (indexé par identifiant de joueur). Une entrée manquante ou vide est
+        /// complétée en faisant tourner les personnages jouables, de la même façon dans les deux équipes.
+        /// </param>
         public static MatchState CreateTeamMatch(
             MatchConfig config,
-            SpellCatalog spells,
+            CharacterCatalog characters,
             int playersPerTeam,
-            MapDefinition map = null)
+            MapDefinition map = null,
+            IReadOnlyList<string> characterIds = null)
         {
             if (playersPerTeam < 1 || playersPerTeam > 4)
             {
                 throw new ArgumentOutOfRangeException(nameof(playersPerTeam), "Entre 1 et 4 joueurs par équipe.");
+            }
+
+            IReadOnlyList<string> playable = characters.PlayableIds;
+            if (playable.Count == 0)
+            {
+                throw new InvalidOperationException("Aucun personnage jouable : impossible de créer un match.");
             }
 
             map = map ?? CreateDefaultMap();
@@ -60,16 +66,30 @@ namespace BigProject.Core.Match
                 List<GridPosition> spawns = team == TeamBlue ? blue : red;
                 for (int slot = 0; slot < playersPerTeam; slot++)
                 {
+                    int playerId = unitId - 1;
+                    string characterId = playerId < (characterIds?.Count ?? 0) ? characterIds[playerId] : null;
+                    if (string.IsNullOrEmpty(characterId))
+                    {
+                        characterId = playable[slot % playable.Count];
+                    }
+
+                    CharacterDefinition character = characters.Get(characterId);
+                    if (character == null)
+                    {
+                        throw new InvalidOperationException("Personnage inconnu : " + characterId);
+                    }
+
                     state.AddUnit(new UnitState(
                         id: unitId,
-                        playerId: unitId - 1,
+                        playerId: playerId,
                         teamId: team,
-                        name: (team == TeamBlue ? "Bleu-" : "Rouge-") + (slot + 1),
+                        name: character.DisplayName + " (" + (team == TeamBlue ? "Bleu" : "Rouge") + "-" + (slot + 1) + ")",
                         position: spawns[slot],
-                        maxHealth: 30,
-                        maxMana: 8,
-                        movementPoints: 4,
-                        spellIds: spells.StartingIds));
+                        maxHealth: character.MaxHealth,
+                        maxMana: character.MaxMana,
+                        movementPoints: character.MovementPoints,
+                        spellIds: character.SpellIds,
+                        characterId: character.Id));
                     unitId++;
                 }
             }

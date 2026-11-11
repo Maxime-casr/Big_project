@@ -52,6 +52,9 @@ namespace BigProject.Client
 
             /// <summary>Les cases où il aura invoqué une unité d'ici cette action : à montrer en transparent.</summary>
             public IReadOnlyList<GridPosition> SummonCells;
+
+            /// <summary>Le personnage invoqué à chacune de ces cases (même ordre).</summary>
+            public IReadOnlyList<string> SummonCharacterIds;
         }
 
         public PlanningTool Tool { get; private set; }
@@ -187,7 +190,8 @@ namespace BigProject.Client
                     Unit = ally,
                     Position = projection.IsValid ? projection.FinalPosition : ally.Position,
                     CurrentOrder = orders.Count > index ? orders[index] : null,
-                    SummonCells = projection.IsValid ? projection.SummonCells : new List<GridPosition>()
+                    SummonCells = projection.IsValid ? projection.SummonCells : new List<GridPosition>(),
+                    SummonCharacterIds = projection.IsValid ? projection.SummonCharacterIds : new List<string>()
                 });
             }
 

@@ -20,8 +20,11 @@ namespace BigProject.Core.Orders
         public int MovementUsed { get; internal set; }
         public int ManaUsed { get; internal set; }
 
-        /// <summary>Les cases où le plan invoque une unité, dans l'ordre.</summary>
+        /// <summary>Les cases où le plan invoque une unité, dans l'ordre (pour les fantômes transparents).</summary>
         public List<GridPosition> SummonCells { get; } = new List<GridPosition>();
+
+        /// <summary>Le personnage invoqué à chacune de ces cases (même ordre que SummonCells).</summary>
+        public List<string> SummonCharacterIds { get; } = new List<string>();
 
         public string Error { get; internal set; }
         public bool IsValid => Error == null;
@@ -173,6 +176,7 @@ namespace BigProject.Core.Orders
                         }
 
                         projection.SummonCells.Add(cast.Target);
+                        projection.SummonCharacterIds.Add(spell.SummonedCharacterId);
                     }
 
                     if (spell.HasEffect(SpellEffectKind.Teleport))

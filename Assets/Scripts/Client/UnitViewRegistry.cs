@@ -81,7 +81,8 @@ namespace BigProject.Client
                 return existing;
             }
 
-            GameObject go = unitPrefab != null ? Instantiate(unitPrefab, transform) : new GameObject();
+            GameObject prefab = GetPrefab(unit.CharacterId);
+            GameObject go = prefab != null ? Instantiate(prefab, transform) : new GameObject();
             go.name = "Unit " + unit.Name + " (visuel uniquement)";
             go.transform.SetParent(transform, false);
             if (!go.TryGetComponent(out UnitView view))
@@ -93,6 +94,20 @@ namespace BigProject.Client
             view.Init(unit, board.CellToWorld(unit.Position), ColorFor(unit, controlled));
             views.Add(unit.Id, view);
             return view;
+        }
+
+        /// <summary>Le prefab d'un personnage : le sien, sinon le prefab par défaut du combat, sinon null (carré).</summary>
+        public GameObject GetPrefab(string characterId)
+        {
+            GameObject own = GameContent.GetCharacterPrefab(characterId);
+            return own != null ? own : unitPrefab;
+        }
+
+        /// <summary>Le SpriteRenderer du prefab d'un personnage, dont les fantômes transparents reprennent l'apparence.</summary>
+        public SpriteRenderer GetSkinSource(string characterId)
+        {
+            GameObject prefab = GetPrefab(characterId);
+            return prefab != null ? prefab.GetComponentInChildren<SpriteRenderer>(true) : null;
         }
 
         public UnitView Get(int unitId)
