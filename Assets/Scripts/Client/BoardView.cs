@@ -1,5 +1,6 @@
 using BigProject.Core.Grid;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using UnityEngine.Tilemaps;
 
 namespace BigProject.Client
@@ -17,7 +18,12 @@ namespace BigProject.Client
         private static readonly Color ObstacleColor = new Color(0.10f, 0.11f, 0.13f);
         private static readonly Color PitColor = new Color(0.04f, 0.07f, 0.16f);
 
+        private static readonly Color GridLineColor = new Color(1f, 1f, 1f, 0.35f);
+        private const int GridLineOrder = 10;
+        private const float GridLineThickness = 0.04f;
+
         private Tilemap tilemap;
+        private Transform gridLines;
 
         public GridMap Map { get; private set; }
         public bool UsesTilemap => tilemap != null;
@@ -37,6 +43,16 @@ namespace BigProject.Client
             }
 
             ComputeBounds();
+            BuildGridLines();
+        }
+
+        private void Update()
+        {
+            Keyboard keyboard = Keyboard.current;
+            if (gridLines != null && keyboard != null && keyboard.gKey.wasPressedThisFrame)
+            {
+                gridLines.gameObject.SetActive(!gridLines.gameObject.activeSelf);
+            }
         }
 
         public Vector3 CellToWorld(GridPosition cell)
@@ -99,6 +115,37 @@ namespace BigProject.Client
             float xMax = Mathf.Max(first.x, last.x) + halfWidth;
             float yMax = Mathf.Max(first.y, last.y) + halfHeight;
             WorldBounds = new Rect(xMin, yMin, xMax - xMin, yMax - yMin);
+        }
+
+        /// <summary>Quadrillage fin posé sur les bordures de cases, au-dessus des surbrillances et sous les unités.</summary>
+        private void BuildGridLines()
+        {
+            if (gridLines != null)
+            {
+                Destroy(gridLines.gameObject);
+            }
+
+            gridLines = new GameObject("Grid Lines").transform;
+            gridLines.SetParent(transform, false);
+
+            Rect bounds = WorldBounds;
+            float cellWidth = bounds.width / Map.Width;
+            float cellHeight = bounds.height / Map.Height;
+            float thickness = Mathf.Min(cellWidth, cellHeight) * GridLineThickness;
+
+            for (int x = 0; x <= Map.Width; x++)
+            {
+                SpriteRenderer line = SpriteFactory.CreateRenderer("Line X " + x, gridLines, GridLineColor, GridLineOrder);
+                line.transform.position = new Vector3(bounds.xMin + x * cellWidth, bounds.center.y, 0f);
+                line.transform.localScale = new Vector3(thickness, bounds.height + thickness, 1f);
+            }
+
+            for (int y = 0; y <= Map.Height; y++)
+            {
+                SpriteRenderer line = SpriteFactory.CreateRenderer("Line Y " + y, gridLines, GridLineColor, GridLineOrder);
+                line.transform.position = new Vector3(bounds.center.x, bounds.yMin + y * cellHeight, 0f);
+                line.transform.localScale = new Vector3(bounds.width + thickness, thickness, 1f);
+            }
         }
 
         private void GenerateTiles()
