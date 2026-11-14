@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using BigProject.Core.Net;
 using BigProject.Online;
 using UnityEngine;
@@ -44,15 +45,15 @@ namespace BigProject.Client
             runner = null;
             OnlineSession = null;
             MenuMessage = string.Empty;
-            LocalTestCharacterId = string.Empty;
+            LocalTestCharacterIds = new List<string>();
         }
 
-        /// <summary>Personnage choisi au menu pour le combat local : il est le premier de l'équipe bleue.</summary>
-        public static string LocalTestCharacterId { get; private set; } = string.Empty;
+        /// <summary>Les personnages des 6 unités du combat local (3 bleus puis 3 rouges), choisis au menu.</summary>
+        public static IReadOnlyList<string> LocalTestCharacterIds { get; private set; } = new List<string>();
 
-        public static void StartLocalTest(string characterId)
+        public static void StartLocalTest(IReadOnlyList<string> characterIds)
         {
-            LocalTestCharacterId = characterId ?? string.Empty;
+            LocalTestCharacterIds = characterIds ?? new List<string>();
             OnlineSession = null;
             SceneManager.LoadScene(CombatSceneName);
         }

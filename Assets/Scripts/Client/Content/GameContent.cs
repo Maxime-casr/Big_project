@@ -191,6 +191,13 @@ namespace BigProject.Client
             return spellAssets.TryGetValue(spellId, out SpellAsset asset) ? asset.Icon : null;
         }
 
+        /// <summary>Le nom de l'état d'Animator à jouer pour lancer ce sort (Spell1 par défaut).</summary>
+        public static string GetCastAnimation(string spellId)
+        {
+            LoadSpells();
+            return spellAssets.TryGetValue(spellId, out SpellAsset asset) ? asset.CastState : nameof(CastAnimation.Spell1);
+        }
+
         /// <summary>La description écrite dans l'asset du sort, ou une chaîne vide.</summary>
         public static string GetDescription(string spellId)
         {

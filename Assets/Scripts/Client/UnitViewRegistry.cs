@@ -123,6 +123,15 @@ namespace BigProject.Client
             }
         }
 
+        /// <summary>Coupe les animations ponctuelles de toutes les unités : une action ne déborde pas sur la suivante.</summary>
+        public void InterruptAnimations()
+        {
+            foreach (UnitView view in views.Values)
+            {
+                view.StopAnimation();
+            }
+        }
+
         /// <summary>Aligne toutes les vues sur l'état réel (fin d'animation, resynchronisation).</summary>
         public void SyncAll(MatchState matchState)
         {

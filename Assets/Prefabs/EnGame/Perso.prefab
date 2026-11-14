@@ -11,6 +11,7 @@ GameObject:
   - component: {fileID: 7334586419029605476}
   - component: {fileID: 5657803946964200763}
   - component: {fileID: 5389027776098112439}
+  - component: {fileID: 3141592653589793238}
   m_Layer: 0
   m_Name: Perso
   m_TagString: Untagged
@@ -105,3 +106,25 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dc94d6c3692657945bdf639522028edf, type: 3}
   m_Name: 
   m_EditorClassIdentifier: BigProject.Client::BigProject.Client.UnitView
+--- !u!95 &3141592653589793238
+Animator:
+  serializedVersion: 7
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6912530281404295444}
+  m_Enabled: 1
+  m_Avatar: {fileID: 0}
+  m_Controller: {fileID: 9100000, guid: 5b0c7e1a94d84f3fa2e6c8d1b7a39e40, type: 2}
+  m_CullingMode: 0
+  m_UpdateMode: 0
+  m_ApplyRootMotion: 0
+  m_LinearVelocityBlending: 0
+  m_StabilizeFeet: 0
+  m_AnimatePhysics: 0
+  m_WarningMessage: 
+  m_HasTransformHierarchy: 1
+  m_AllowConstantClipSamplingOptimization: 1
+  m_KeepAnimatorStateOnDisable: 0
+  m_WriteDefaultValuesOnDisable: 0

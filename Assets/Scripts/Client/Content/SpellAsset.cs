@@ -5,6 +5,13 @@ using UnityEngine;
 
 namespace BigProject.Client
 {
+    /// <summary>L'état de l'Animator joué par le lanceur d'un sort (voir Perso.controller).</summary>
+    public enum CastAnimation
+    {
+        Spell1,
+        Spell2
+    }
+
     /// <summary>
     /// Un sort, créé comme un asset (Create > Big Project > Sorts > Sort). Tout sort placé dans
     /// Assets/Resources/Spells/ est ajouté au jeu automatiquement : aucune liste à tenir à jour.
@@ -22,6 +29,10 @@ namespace BigProject.Client
 
         [Header("Coût")]
         [Min(0)] [SerializeField] private int manaCost = 2;
+
+        [Header("Animation")]
+        [Tooltip("L'état de l'Animator joué par le lanceur quand il lance ce sort.")]
+        [SerializeField] private CastAnimation castAnimation = CastAnimation.Spell1;
 
         [Header("Ciblage")]
         [Tooltip("Case : on vise une case. Unit : on vise une unité, que le sort suit. Self : aucune cible.")]
@@ -46,6 +57,9 @@ namespace BigProject.Client
         public Sprite Icon => icon;
         public int ManaCost => manaCost;
         public TargetKind Targeting => targeting;
+
+        /// <summary>Le nom de l'état de l'Animator à jouer pour lancer ce sort.</summary>
+        public string CastState => castAnimation.ToString();
 
         /// <summary>L'identifiant du sort : celui saisi, sinon le nom de l'asset mis en forme.</summary>
         public string Id => string.IsNullOrWhiteSpace(id) ? AssetIds.Slug(name) : id.Trim();

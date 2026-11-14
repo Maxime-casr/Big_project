@@ -32,6 +32,10 @@ namespace BigProject.Client
         private Color bodyColor;
         private Vector3 baseScale = Vector3.one;
         private int maxHealth;
+        private UnitAnimation animation;
+
+        /// <summary>Vrai si le prefab a un Animator : les animations remplacent alors les effets de secours (pulsation, rétrécissement).</summary>
+        public bool HasAnimation => animation != null;
 
         public int UnitId { get; private set; }
 
@@ -53,6 +57,7 @@ namespace BigProject.Client
             // À chercher avant de créer quoi que ce soit : ce que l'on ajoute ensuite a aussi un SpriteRenderer.
             body = GetComponentInChildren<SpriteRenderer>(true);
             HasCustomBody = body != null;
+            animation = UnitAnimation.Create(gameObject);
 
             // Les éléments d'interface vivent dans un objet à l'échelle inverse : leur taille reste celle d'une
             // case, quelle que soit l'échelle donnée au personnage.
@@ -127,10 +132,37 @@ namespace BigProject.Client
             body.color = bodyColor;
             SetHealth(health);
             gameObject.SetActive(alive);
+            if (alive)
+            {
+                animation?.Reset();
+            }
+        }
+
+        private void Update()
+        {
+            animation?.Tick();
+        }
+
+        /// <summary>Joue l'animation d'un sort (« Spell1 », « Spell2 »...). Sans effet si le personnage n'a pas d'animation.</summary>
+        public void PlayCast(string state)
+        {
+            animation?.PlayOnce(state);
+        }
+
+        public void PlayHit()
+        {
+            animation?.PlayOnce(UnitAnimation.HitState);
+        }
+
+        /// <summary>Coupe l'animation ponctuelle en cours (sort annulé, fin de l'action).</summary>
+        public void StopAnimation()
+        {
+            animation?.Interrupt();
         }
 
         public IEnumerator MoveTo(Vector3 target, float duration)
         {
+            animation?.SetMoving(true);
             Vector3 start = transform.position;
             for (float elapsed = 0f; elapsed < duration; elapsed += Time.deltaTime)
             {
@@ -139,6 +171,7 @@ namespace BigProject.Client
             }
 
             transform.position = target;
+            animation?.SetMoving(false);
         }
 
         /// <summary>Disparaît sur place, réapparaît à destination.</summary>
@@ -204,6 +237,13 @@ namespace BigProject.Client
 
         public IEnumerator Die(float duration)
         {
+            // Avec une animation de mort, l'unité reste affichée jusqu'à la fin de la lecture du tour.
+            if (animation != null)
+            {
+                animation.PlayDeath();
+                yield break;
+            }
+
             for (float elapsed = 0f; elapsed < duration; elapsed += Time.deltaTime)
             {
                 float remaining = 1f - elapsed / duration;

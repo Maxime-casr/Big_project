@@ -17,6 +17,8 @@ namespace BigProject.Client
     /// </summary>
     public sealed class CombatBootstrap : MonoBehaviour
     {
+        private const int PlayersPerTeam = 3;
+
         [Tooltip("Durée de planification d'un tour pour le combat local de test.")]
         [SerializeField] private float planningSeconds = 20f;
 
@@ -94,16 +96,18 @@ namespace BigProject.Client
             MapSource source = FindAnyObjectByType<MapSource>();
             MapDefinition map = source != null ? source.Read() : null;
 
-            // Les personnages jouables défilent d'un slot à l'autre, en commençant par celui choisi au menu.
+            // Un personnage par unité (3 bleus puis 3 rouges), choisi au menu. Sans choix (scène lancée
+            // directement) ou pour une entrée vide : le Chevalier, à défaut le premier personnage jouable.
             var playable = new List<string>(characters.PlayableIds);
-            int start = Mathf.Max(0, playable.IndexOf(GameFlow.LocalTestCharacterId));
+            string fallback = playable.Contains("knight") ? "knight" : playable[0];
             var ids = new List<string>();
-            for (int i = 0; i < playable.Count; i++)
+            for (int i = 0; i < PlayersPerTeam * 2; i++)
             {
-                ids.Add(playable[(start + i) % playable.Count]);
+                string chosen = i < GameFlow.LocalTestCharacterIds.Count ? GameFlow.LocalTestCharacterIds[i] : null;
+                ids.Add(string.IsNullOrEmpty(chosen) ? fallback : chosen);
             }
 
-            MatchState match = MatchFactory.CreateTeamMatch(new MatchConfig(), characters, 3, map, ids);
+            MatchState match = MatchFactory.CreateTeamMatch(new MatchConfig(), characters, PlayersPerTeam, map, ids);
             var resolver = new RoundResolver(spells, new LastTeamStandingCondition(), null, characters);
 
             var players = new List<int>();

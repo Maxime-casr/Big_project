@@ -15,9 +15,9 @@ MonoBehaviour:
   id: knight
   displayName: Chevalier
   description: 
-  icon: {fileID: 0}
+  icon: {fileID: -5711848221618334454, guid: 59e822ec93f1d34429629273245b4b7f, type: 3}
   playable: 1
-  prefab: {fileID: 0}
+  prefab: {fileID: 4613358297643628279, guid: f5f221512576ca84f802ac0b2c8a2b52, type: 3}
   maxHealth: 40
   maxMana: 6
   movementPoints: 3

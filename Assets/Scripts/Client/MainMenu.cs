@@ -22,10 +22,15 @@ namespace BigProject.Client
         }
 
         private const string CharacterPrefKey = "BigProject.Character";
+        private const string LocalPrefKey = "BigProject.LocalCharacters";
+        private const string DefaultCharacterId = "knight";
+        private const int LocalSlotCount = 6;
 
         private MenuState state = MenuState.Menu;
         private List<GameContent.CharacterInfo> characterChoices = new List<GameContent.CharacterInfo>();
         private int characterIndex;
+        private readonly int[] localIndices = new int[LocalSlotCount];
+        private Vector2 menuScroll;
         private string address = "localhost";
         private string portText = "7777";
         private string playerName = "Joueur";
@@ -63,8 +68,20 @@ namespace BigProject.Client
         private void LoadCharacterChoices()
         {
             characterChoices = GameContent.GetPlayableCharacters();
+
+            // Par défaut, tout le monde joue le Chevalier ; sans lui, le premier personnage jouable.
+            int fallback = Mathf.Max(0, characterChoices.FindIndex(c => c.Id == DefaultCharacterId));
+
             string saved = PlayerPrefs.GetString(CharacterPrefKey, string.Empty);
-            characterIndex = Mathf.Max(0, characterChoices.FindIndex(c => c.Id == saved));
+            int savedIndex = characterChoices.FindIndex(c => c.Id == saved);
+            characterIndex = savedIndex >= 0 ? savedIndex : fallback;
+
+            string[] savedLocal = PlayerPrefs.GetString(LocalPrefKey, string.Empty).Split(',');
+            for (int slot = 0; slot < LocalSlotCount; slot++)
+            {
+                int index = slot < savedLocal.Length ? characterChoices.FindIndex(c => c.Id == savedLocal[slot]) : -1;
+                localIndices[slot] = index >= 0 ? index : fallback;
+            }
         }
 
         private void OnDestroy()
@@ -109,6 +126,7 @@ namespace BigProject.Client
         {
             DrawBox(() =>
             {
+                menuScroll = GUILayout.BeginScrollView(menuScroll);
                 GUILayout.Label("<b>Big Project — tour par tour simultané</b>", RichLabel());
                 if (!string.IsNullOrEmpty(message))
                 {
@@ -116,15 +134,16 @@ namespace BigProject.Client
                 }
 
                 GUILayout.Space(8f);
-                DrawCharacterPicker();
+                DrawLocalPicker();
                 GUILayout.Space(4f);
                 if (GUILayout.Button("Combat local (test)", GUILayout.Height(36f)))
                 {
-                    GameFlow.StartLocalTest(SelectedCharacterId);
+                    GameFlow.StartLocalTest(LocalCharacterIds());
                 }
 
                 GUILayout.Space(10f);
                 GUILayout.Label("<b>En ligne</b>", RichLabel());
+                DrawCharacterPicker();
                 playerName = LabeledField("Pseudo", playerName);
                 address = LabeledField("Adresse du serveur", address);
                 portText = LabeledField("Port", portText);
@@ -140,13 +159,62 @@ namespace BigProject.Client
                 {
                     StartServer(ParseInt(portText, 7777), ParseInt(playersPerTeamText, 3), 20);
                 }
+
+                GUILayout.EndScrollView();
             });
         }
 
         private string SelectedCharacterId =>
             characterChoices.Count == 0 ? string.Empty : characterChoices[characterIndex].Id;
 
-        /// <summary>Le choix du personnage : deux flèches, son nom, ses stats et ses sorts.</summary>
+        /// <summary>Les personnages des 6 unités du combat local : 3 de l'équipe bleue puis 3 de la rouge.</summary>
+        private List<string> LocalCharacterIds()
+        {
+            var ids = new List<string>();
+            foreach (int index in localIndices)
+            {
+                ids.Add(characterChoices.Count == 0 ? string.Empty : characterChoices[index].Id);
+            }
+
+            return ids;
+        }
+
+        /// <summary>Un personnage au choix pour chacune des 6 unités du combat local.</summary>
+        private void DrawLocalPicker()
+        {
+            GUILayout.Label("<b>Combat local : personnage de chaque unité</b>", RichLabel());
+            if (characterChoices.Count == 0)
+            {
+                GUILayout.Label("Aucun personnage jouable (voir Assets/Resources/Characters).");
+                return;
+            }
+
+            for (int slot = 0; slot < LocalSlotCount; slot++)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label((slot < LocalSlotCount / 2 ? "Bleu " : "Rouge ") + (slot % (LocalSlotCount / 2) + 1), GUILayout.Width(60f));
+                if (GUILayout.Button("<", GUILayout.Width(30f)))
+                {
+                    ChangeLocalCharacter(slot, -1);
+                }
+
+                GUILayout.Label("<b>" + characterChoices[localIndices[slot]].Name + "</b>", CenteredLabel());
+                if (GUILayout.Button(">", GUILayout.Width(30f)))
+                {
+                    ChangeLocalCharacter(slot, 1);
+                }
+
+                GUILayout.EndHorizontal();
+            }
+        }
+
+        private void ChangeLocalCharacter(int slot, int step)
+        {
+            localIndices[slot] = (localIndices[slot] + step + characterChoices.Count) % characterChoices.Count;
+            PlayerPrefs.SetString(LocalPrefKey, string.Join(",", LocalCharacterIds()));
+        }
+
+        /// <summary>Le choix du personnage en ligne : deux flèches, son nom, ses stats et ses sorts.</summary>
         private void DrawCharacterPicker()
         {
             if (characterChoices.Count == 0)
@@ -155,7 +223,7 @@ namespace BigProject.Client
                 return;
             }
 
-            GUILayout.Label("<b>Personnage</b>", RichLabel());
+            GUILayout.Label("<b>Mon personnage</b>", RichLabel());
             GUILayout.BeginHorizontal();
             if (GUILayout.Button("<", GUILayout.Width(36f), GUILayout.Height(28f)))
             {
