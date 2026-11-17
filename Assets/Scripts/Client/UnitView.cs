@@ -25,6 +25,9 @@ namespace BigProject.Client
         private const int MarkerOrder = 20;
         private const int BodyOrder = 21;
 
+        [Tooltip("Décoche si les sprites de ce personnage sont dessinés tournés vers la gauche.")]
+        [SerializeField] private bool spriteFacesRight = true;
+
         private SpriteRenderer body;
         private SpriteRenderer teamMarker;
         private SpriteRenderer selection;
@@ -143,6 +146,21 @@ namespace BigProject.Client
             animation?.Tick();
         }
 
+        /// <summary>
+        /// Retourne le sprite vers la gauche ou la droite selon la direction (l'animation ne touche pas à ce réglage).
+        /// Sans mouvement horizontal (haut, bas, même case), le sprite garde son orientation.
+        /// </summary>
+        public void FaceToward(Vector3 target)
+        {
+            float dx = target.x - transform.position.x;
+            if (!HasCustomBody || Mathf.Abs(dx) < 0.01f)
+            {
+                return;
+            }
+
+            body.flipX = (dx > 0f) != spriteFacesRight;
+        }
+
         /// <summary>Joue l'animation d'un sort (« Spell1 », « Spell2 »...). Sans effet si le personnage n'a pas d'animation.</summary>
         public void PlayCast(string state)
         {
@@ -162,6 +180,7 @@ namespace BigProject.Client
 
         public IEnumerator MoveTo(Vector3 target, float duration)
         {
+            FaceToward(target);
             animation?.SetMoving(true);
             Vector3 start = transform.position;
             for (float elapsed = 0f; elapsed < duration; elapsed += Time.deltaTime)

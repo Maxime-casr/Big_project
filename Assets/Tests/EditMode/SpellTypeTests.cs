@@ -68,10 +68,10 @@ namespace BigProject.Tests
             resolver.Resolve(state, new[]
             {
                 Plan(1, 1, Bolt(enemy)),
-                Plan(2, 2, Move(P(4, 2), P(4, 3)))
+                Plan(2, 2, Move(P(4, 2)))
             });
 
-            Assert.AreEqual(P(4, 3), enemy.Position);
+            Assert.AreEqual(P(4, 2), enemy.Position);
             Assert.AreEqual(25, enemy.Health, "Le sort ciblé touche l'unité où qu'elle soit allée.");
         }
 
@@ -80,13 +80,13 @@ namespace BigProject.Tests
         {
             MatchState state = NewState();
             UnitState caster = AddUnit(state, 1, 0, P(1, 1));
-            UnitState enemy = AddUnit(state, 2, 1, P(3, 1));
+            UnitState enemy = AddUnit(state, 2, 1, P(5, 2));
 
             // Action 1 : l'ennemi s'éloigne hors de portée (portée 4) ; action 2 : le sort part trop tard.
             resolver.Resolve(state, new[]
             {
                 Plan(1, 1, Move(P(1, 2)), Bolt(enemy)),
-                Plan(2, 2, Move(P(4, 1), P(5, 1), P(6, 1)))
+                Plan(2, 2, Move(P(6, 2)))
             });
 
             Assert.AreEqual(30, enemy.Health);
@@ -105,7 +105,7 @@ namespace BigProject.Tests
             resolver.Resolve(state, new[]
             {
                 Plan(1, 1, Bolt(enemy)),
-                Plan(2, 2, Move(P(6, 1), P(7, 1)))
+                Plan(2, 2, Move(P(6, 1)))
             });
 
             Assert.AreEqual(25, enemy.Health);
@@ -132,12 +132,12 @@ namespace BigProject.Tests
         {
             MatchState state = NewState();
             UnitState caster = AddUnit(state, 1, 0, P(1, 1));
-            UnitState enemy = AddUnit(state, 2, 1, P(3, 1));
+            UnitState enemy = AddUnit(state, 2, 1, P(5, 2));
 
             resolver.Resolve(state, new[]
             {
                 Plan(1, 1, Move(P(1, 2)), Bolt(enemy), Move(P(1, 3))),
-                Plan(2, 2, Move(P(4, 1), P(5, 1), P(6, 1)))
+                Plan(2, 2, Move(P(6, 2)))
             });
 
             Assert.AreEqual(P(1, 2), caster.Position, "Le sort perdu interrompt la marche qui suit.");
@@ -231,7 +231,7 @@ namespace BigProject.Tests
 
             resolver.Resolve(state, new[]
             {
-                Plan(1, 1, new CastOrder("blink", P(4, 1)), Move(P(5, 1), P(6, 1)))
+                Plan(1, 1, new CastOrder("blink", P(4, 1)), Move(P(5, 1)), Move(P(6, 1)))
             });
 
             Assert.AreEqual(P(6, 1), caster.Position);
@@ -322,7 +322,7 @@ namespace BigProject.Tests
             resolver.Resolve(state, new[]
             {
                 Plan(1, 1, new CastOrder("totem", P(3, 1))),
-                Plan(2, 2, Move(P(5, 1), P(4, 1), P(3, 1), P(2, 1)))
+                Plan(2, 2, Move(P(5, 1)), Move(P(4, 1)), Move(P(3, 1)), Move(P(2, 1)))
             });
 
             Assert.AreEqual(P(4, 1), walker.Position, "L'invocation est apparue avant : le marcheur s'arrête devant.");

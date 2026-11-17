@@ -96,6 +96,12 @@ namespace BigProject.Core.Orders
                 return "Déplacement vide.";
             }
 
+            // Un déplacement = une case = une action : avancer de 3 cases fait 3 actions.
+            if (move.Path.Count > 1)
+            {
+                return "Un déplacement ne fait qu'une case par action.";
+            }
+
             var visited = new HashSet<GridPosition> { position };
             foreach (GridPosition cell in move.Path)
             {

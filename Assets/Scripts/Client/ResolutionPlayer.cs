@@ -179,6 +179,7 @@ namespace BigProject.Client
                     return units.Get(blocked.UnitId).Bump(board.CellToWorld(blocked.Attempted), seconds);
 
                 case SpellCastEvent cast:
+                    units.Get(cast.CasterId).FaceToward(board.CellToWorld(cast.Target));
                     return Cast(units.Get(cast.CasterId), cast.SpellId, seconds);
 
                 case SpellFizzledEvent fizzled:

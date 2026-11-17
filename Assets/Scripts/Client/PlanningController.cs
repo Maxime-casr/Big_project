@@ -310,8 +310,8 @@ namespace BigProject.Client
         }
 
         /// <summary>
-        /// Avance d'une case dans la direction donnée (boutons de direction). Prolonge le déplacement en
-        /// cours de planification ; la direction opposée annule le dernier pas.
+        /// Avance d'une case dans la direction donnée (boutons de direction). Chaque pas est une action à part
+        /// entière : 3 pas = 3 actions.
         /// </summary>
         public void AddStep(GridPosition direction)
         {
@@ -328,45 +328,8 @@ namespace BigProject.Client
             }
 
             var candidate = new List<UnitOrder>(GetDraft(unit.Id));
-            int lastIndex = candidate.Count - 1;
-
-            if (lastIndex >= 0 && candidate[lastIndex] is MoveOrder lastMove)
-            {
-                var withoutLast = new List<UnitOrder>(candidate);
-                withoutLast.RemoveAt(lastIndex);
-                GridPosition moveStart = PlanValidator.Project(session.State, session.Spells, unit, withoutLast).FinalPosition;
-
-                var path = new List<GridPosition>(lastMove.Path);
-                GridPosition end = path[path.Count - 1];
-                GridPosition previous = path.Count >= 2 ? path[path.Count - 2] : moveStart;
-
-                if (end + direction == previous)
-                {
-                    path.RemoveAt(path.Count - 1);
-                    if (path.Count == 0)
-                    {
-                        candidate.RemoveAt(lastIndex);
-                    }
-                    else
-                    {
-                        candidate[lastIndex] = new MoveOrder(path);
-                    }
-
-                    drafts[unit.Id] = candidate;
-                    draftDirty = true;
-                    Message = "Pas annulé.";
-                    RefreshHighlights();
-                    return;
-                }
-
-                path.Add(end + direction);
-                candidate[lastIndex] = new MoveOrder(path);
-            }
-            else
-            {
-                GridPosition start = PlanValidator.Project(session.State, session.Spells, unit, candidate).FinalPosition;
-                candidate.Add(new MoveOrder(new[] { start + direction }));
-            }
+            GridPosition start = PlanValidator.Project(session.State, session.Spells, unit, candidate).FinalPosition;
+            candidate.Add(new MoveOrder(new[] { start + direction }));
 
             PlanProjection projection = PlanValidator.Project(session.State, session.Spells, unit, candidate);
             if (!projection.IsValid)
@@ -377,7 +340,7 @@ namespace BigProject.Client
 
             drafts[unit.Id] = candidate;
             draftDirty = true;
-            Message = "Pas ajouté.";
+            Message = "Pas ajouté (action " + candidate.Count + ").";
             RefreshHighlights();
             FocusRequested?.Invoke();
         }
@@ -599,49 +562,19 @@ namespace BigProject.Client
                 return;
             }
 
-            if (IsLocked || Tool == PlanningTool.Select)
+            // Les déplacements se font case par case avec les boutons : cliquer sur une case ne marche pas.
+            if (IsLocked || Tool == PlanningTool.Select || Tool == PlanningTool.Move)
             {
                 return;
             }
 
-            if (Tool == PlanningTool.Move)
-            {
-                TryAddMove(cell);
-            }
-            else
-            {
-                TryAddCast(cell);
-            }
+            TryAddCast(cell);
         }
 
         private void OnHoverChanged(GridPosition? cell)
         {
             hoveredCell = cell;
             RefreshHighlights();
-        }
-
-        private void TryAddMove(GridPosition target)
-        {
-            UnitState unit = SelectedUnit;
-            if (unit == null)
-            {
-                Message = "Sélectionne d'abord une unité.";
-                return;
-            }
-
-            PlanProjection projection = GetProjection(unit);
-            int remaining = unit.MovementPoints - projection.MovementUsed;
-            List<GridPosition> path = Pathfinder.FindPath(session.State.Map, projection.FinalPosition, target, remaining);
-            if (path == null)
-            {
-                Message = "Case inaccessible avec les PM restants (" + remaining + ").";
-                return;
-            }
-
-            if (TryAppend(unit, new MoveOrder(path), "Déplacement de " + path.Count + " case(s) ajouté."))
-            {
-                FocusRequested?.Invoke();
-            }
         }
 
         private void TryAddCast(GridPosition target)
@@ -768,11 +701,6 @@ namespace BigProject.Client
                 int remaining = unit.MovementPoints - projection.MovementUsed;
                 List<GridPosition> reachable = Pathfinder.GetReachable(map, origin, remaining);
                 highlighter.Set(HighlightLayer.Reachable, reachable);
-
-                if (hoveredCell.HasValue && reachable.Contains(hoveredCell.Value))
-                {
-                    highlighter.Set(HighlightLayer.Path, Pathfinder.FindPath(map, origin, hoveredCell.Value, remaining));
-                }
             }
             else if (Tool == PlanningTool.Spell && ActiveSpellId != null)
             {

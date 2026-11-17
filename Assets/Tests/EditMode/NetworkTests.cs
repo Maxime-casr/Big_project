@@ -142,7 +142,13 @@ namespace BigProject.Tests
             }
 
             var path = Pathfinder.FindPath(session.State.Map, unit.Position, target, 4);
-            return new TurnPlan(session.LocalPlayerId, new[] { new UnitPlan(unit.Id, new UnitOrder[] { new MoveOrder(path) }) });
+            var orders = new List<UnitOrder>();
+            foreach (GridPosition cell in path)
+            {
+                orders.Add(new MoveOrder(new[] { cell }));
+            }
+
+            return new TurnPlan(session.LocalPlayerId, new[] { new UnitPlan(unit.Id, orders) });
         }
 
         private static UnitState OwnUnit(NetworkMatchSession session)

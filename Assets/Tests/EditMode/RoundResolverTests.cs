@@ -56,10 +56,10 @@ namespace BigProject.Tests
             UnitState a = AddUnit(state, 1, 0, P(1, 1));
             AddUnit(state, 2, 1, P(8, 8));
 
-            RoundResult result = resolver.Resolve(state, new[] { Plan(1, 1, Move(P(2, 1), P(3, 1))) });
+            RoundResult result = resolver.Resolve(state, new[] { Plan(1, 1, Move(P(2, 1)), Move(P(3, 1))) });
 
             Assert.AreEqual(P(3, 1), a.Position);
-            Assert.AreEqual(2, result.Beats.Count);
+            Assert.AreEqual(2, result.Beats.Count, "Une case par action : deux cases, deux actions.");
             Assert.AreEqual(2, state.RoundNumber);
         }
 
@@ -155,7 +155,7 @@ namespace BigProject.Tests
             resolver.Resolve(state, new[]
             {
                 Plan(1, 1, Move(P(2, 1))),
-                Plan(2, 2, Move(P(1, 1), P(2, 1)))
+                Plan(2, 2, Move(P(1, 1)), Move(P(2, 1)))
             });
 
             Assert.AreEqual(P(1, 1), first.Position);
@@ -163,7 +163,7 @@ namespace BigProject.Tests
         }
 
         [Test]
-        public void SpellIsCastWithTheFirstMovementAndImpactsWithTheLast()
+        public void SpellIsCastAtTheStartAndImpactsAtTheEndOfTheSameAction()
         {
             MatchState state = NewState();
             AddUnit(state, 1, 0, P(1, 1));
@@ -173,18 +173,15 @@ namespace BigProject.Tests
             RoundResult result = resolver.Resolve(state, new[]
             {
                 Plan(1, 1, new CastOrder("piercing_arrow", P(1, 4))),
-                Plan(3, 3, Move(P(6, 5), P(7, 5), P(8, 5)))
+                Plan(3, 3, Move(P(6, 5)))
             });
 
-            Assert.AreEqual(3, result.Beats.Count);
+            Assert.AreEqual(1, result.Beats.Count);
             Assert.IsInstanceOf<SpellCastEvent>(result.Beats[0].Events[0]);
-            Assert.IsTrue(result.Beats[2].Events.Exists(e => e is UnitDamagedEvent));
-            Assert.IsFalse(result.Beats[0].Events.Exists(e => e is UnitDamagedEvent));
+            Assert.IsTrue(result.Beats[0].Events.Exists(e => e is UnitMovedEvent));
+            Assert.IsTrue(result.Beats[0].Events.Exists(e => e is UnitDamagedEvent));
             Assert.AreEqual(26, target.Health);
-            foreach (ResolutionBeat beat in result.Beats)
-            {
-                Assert.AreEqual(0, beat.StepIndex);
-            }
+            Assert.AreEqual(0, result.Beats[0].StepIndex);
         }
 
         [Test]
@@ -228,7 +225,7 @@ namespace BigProject.Tests
             UnitState a = AddUnit(state, 1, 0, P(1, 1));
             UnitState b = AddUnit(state, 2, 1, P(3, 1));
 
-            resolver.Resolve(state, new[] { Plan(1, 1, Move(P(2, 1), P(3, 1), P(4, 1))) });
+            resolver.Resolve(state, new[] { Plan(1, 1, Move(P(2, 1)), Move(P(3, 1)), Move(P(4, 1))) });
 
             Assert.AreEqual(P(2, 1), a.Position);
             Assert.AreEqual(P(3, 1), b.Position);
@@ -296,7 +293,7 @@ namespace BigProject.Tests
 
             resolver.Resolve(state, new[]
             {
-                Plan(1, 1, Move(P(2, 1), P(3, 1), P(4, 1)), new CastOrder("fireball", P(8, 1)))
+                Plan(1, 1, Move(P(2, 1)), Move(P(3, 1)), Move(P(4, 1)), new CastOrder("fireball", P(8, 1)))
             });
 
             Assert.AreEqual(P(4, 1), caster.Position);
@@ -312,7 +309,7 @@ namespace BigProject.Tests
 
             RoundResult result = resolver.Resolve(state, new[]
             {
-                Plan(1, 1, Move(P(1, 0), P(2, 0), P(3, 0), P(4, 0), P(5, 0)))
+                Plan(1, 1, Move(P(1, 0)), Move(P(2, 0)), Move(P(3, 0)), Move(P(4, 0)), Move(P(5, 0)))
             });
 
             Assert.AreEqual(P(0, 0), a.Position);
@@ -385,7 +382,7 @@ namespace BigProject.Tests
             TurnPlan[] plans =
             {
                 Plan(1, 1, Move(P(2, 1)), new CastOrder("piercing_arrow", P(2, 5))),
-                Plan(2, 2, Move(P(2, 4), P(2, 5)))
+                Plan(2, 2, Move(P(2, 4)), Move(P(2, 5)))
             };
 
             MatchState first = NewState();
